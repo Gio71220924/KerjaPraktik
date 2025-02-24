@@ -47,7 +47,16 @@
             @endfor
         </div>
     
-        <button type="submit" class="btn btn-primary">Find Goal</button>
-        <br>
+        <button type="submit" name="action_type" value="matching" class="btn btn-primary">Matching Rule</button>
+        <button type="submit" name="action_type" value="fc" class="btn btn-primary">Forward Chaining</button>
+        <button type="submit" name="action_type" value="bc" class="btn btn-primary">Backward Chaining</button>
     </form>
+    <br>
+    {{-- <form action="#">
+        <button type="submit" name="action_type" value="fc" class="btn btn-primary">Forward Chaining</button>
+    </form>
+    <br>
+    <form action="#">
+        <button type="submit" name="action_type" value="bc" class="btn btn-primary">Backward Chaining</button>
+    </form> --}}
 @endsection

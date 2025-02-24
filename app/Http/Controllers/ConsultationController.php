@@ -81,26 +81,35 @@ class ConsultationController extends Controller
     
                 if ($valid_values) {
                     $data[$kolom_name] = $input_value;
-                    $queryCheck->where($kolom_name, $input_value);
                 } else {
                     return redirect()->back()->withErrors("Invalid value for attribute {$atribut_name}.");
                 }
             }
             
         }
-    
-        // Cek apakah data sudah ada
-        if ($queryCheck->exists()) {
-            return redirect()->back()->withErrors('Data already exists.');
-        }
 
         // Setelah data disiapkan, lakukan insert ke dalam tabel
         if (!empty($data)) {
             DB::table($tableName)->insert($data);
-            return redirect()->route('inference.generate', ['user_id' => $user_id, 'case_num' => $user_id])->with('success', 'Case added successfully.');
+            // return redirect()->route('inference.generate', ['user_id' => $user_id, 'case_num' => $user_id])->with('success', 'Case added successfully.');
         } else {
             return redirect()->back()->withErrors('No data to insert.');
         }
+
+        // Ambil action_type untuk menentukan redirect
+        $actionType = $request->input('action_type');
+
+        if ($actionType === 'matching') {
+            return redirect()->route('inference.generate', ['user_id' => $user_id, 'case_num' => $user_id])
+                ->with('success', 'Matching Rule executed!');
+        } elseif ($actionType === 'fc') {
+            return redirect()->route('inference.fc', ['user_id' => $user_id, 'case_num' => $user_id])
+                ->with('success', 'Forward Chaining executed!');
+        } elseif ($actionType === 'bc') {
+            return redirect()->route('/')->with('success', 'Backward Chaining executed!');
+        }
+
+        return redirect()->back()->with('error', 'Invalid action!');
     }
 
     public function edit($case_id)
@@ -138,8 +147,6 @@ class ConsultationController extends Controller
 
         $data = [];
 
-        $queryCheck = DB::table($tableName)->where('user_id', $user_id)->where('case_id', '!=', $case_id);
-
         foreach ($atributs as $atribut) {
             $kolom_name = "{$atribut->atribut_id}_{$atribut->atribut_name}";
 
@@ -155,17 +162,10 @@ class ConsultationController extends Controller
     
                 if ($valid_values) {
                     $data[$kolom_name] = $input_value;
-                    // Tambahkan kondisi pengecekan ke query
-                    $queryCheck->where($kolom_name, $input_value);
                 } else {
                     return redirect()->back()->withErrors("Invalid value for attribute {$atribut->atribut_name}.");
                 }
             }
-        }
-
-        // Cek apakah data dengan kombinasi yang sama sudah ada (kecuali yang sedang diedit)
-        if ($queryCheck->exists()) {
-            return redirect()->back()->withErrors('Data already exists.');
         }
         
         // Update data berdasarkan case_id

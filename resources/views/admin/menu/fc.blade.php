@@ -4,7 +4,7 @@
 
     @php
     $user = Auth::user();
-    $inferensi = new \App\Models\Inferensi();
+    $inferensi = new \App\Models\ForwardChaining();
     $inferensi->setTableForUser($user->user_id);
 
     // Periksa apakah tabel ada
@@ -14,7 +14,7 @@
     $kasus = \App\Models\Kasus::where('case_num', $user->user_id)->first();
     @endphp
 
-    <h1 class="mt-4">Inferensi Matching Rule for User: {{ $user->username }}</h1>
+    <h1 class="mt-4">Inferensi Forward Chaining for User: {{ $user->username }}</h1>
 
     @if(isset($success))
         <div class="alert alert-success">
@@ -23,7 +23,7 @@
     @endif
     
     <!-- Tombol Generate Tree -->
-    <a href="{{ url('/inference/' . Auth::id() . '/' . Auth::id()) }}" class="btn btn-primary">Generate Inference</a>
+    <a href="{{ url('/forwardChaining/' . Auth::id() . '/' . Auth::id()) }}" class="btn btn-primary">Generate Inference</a>
 
     <br>
     <br>

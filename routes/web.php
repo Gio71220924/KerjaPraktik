@@ -10,6 +10,7 @@ use App\Http\Controllers\CaseController;
 use App\Http\Controllers\CaseUserController;
 use App\Http\Controllers\ConsultationController;
 use App\Http\Controllers\DecisionTreeController;
+use App\Http\Controllers\FCController;
 use App\Http\Controllers\InferenceController;
 use App\Http\Controllers\ProfileAdminController;
 use App\Http\Controllers\ProfileController;
@@ -67,7 +68,12 @@ Route::get('/inference', function () {
 });
 Route::get('/inference/{user_id}/{case_num}', [InferenceController::class, 'generateInference']);
 Route::post('/inference/{user_id}/{case_num}', [InferenceController::class, 'generate'])->name('inference.generate');
-
+//fc
+Route::get('/forwardChaining', function () {
+    return view('admin.menu.fc');
+});
+Route::get('/forwardChaining/{user_id}/{case_num}', [FCController::class, 'generateFC']);
+Route::post('/forwardChaining/{user_id}/{case_num}', [FCController::class, 'generateFC'])->name('inference.fc');
 
 //profile
 Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

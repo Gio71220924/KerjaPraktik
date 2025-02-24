@@ -7,6 +7,7 @@ use App\Console\Commands\RunRule;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use App\Console\Commands\RunC45; // Import command RunC45
+use App\Console\Commands\RunFC;
 use App\Console\Commands\RunInference;
 
 class Kernel extends ConsoleKernel
@@ -17,6 +18,7 @@ class Kernel extends ConsoleKernel
         RunRule::class, // Daftarkan perintah RunC45 di sini
         RunInference::class,
         RunBuatData::class,
+        RunFC::class,
     ];
 
     // Menjadwalkan perintah (Jika perlu)
