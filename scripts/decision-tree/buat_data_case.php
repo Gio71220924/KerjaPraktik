@@ -117,12 +117,21 @@ if ($result->num_rows > 0) {
     $droptabel = $conn->query("drop table $tabeltestkasus");
 } 
 
-$createtestdata = "create table $tabeltestkasus LIKE $tabeldatakasus";
-
+// Buat tabel baru berdasarkan tabel kasus asli
+$createtestdata = "CREATE TABLE $tabeltestkasus LIKE $tabeldatakasus";
 if ($conn->query($createtestdata) === TRUE) {
-    echo "create table successfully";
+    echo "Tabel test kasus berhasil dibuat. <br>";
+
+    // Tambahkan kolom algoritma setelah tabel dibuat
+    $addColumn = "ALTER TABLE $tabeltestkasus ADD COLUMN algoritma VARCHAR(50) NOT NULL DEFAULT ''";
+    
+    if ($conn->query($addColumn) === TRUE) {
+        echo "Kolom algoritma berhasil ditambahkan.";
+    } else {
+        echo "Error menambahkan kolom: " . $conn->error;
+    }
 } else {
-    echo "Error creating tabel: " . $conn->error;
+    echo "Error membuat tabel: " . $conn->error;
 }
 
 $conn->close();

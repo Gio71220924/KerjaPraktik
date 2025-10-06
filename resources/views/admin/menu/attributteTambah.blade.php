@@ -24,7 +24,7 @@
     <div class="mb-3">
         <label for="atribut_name" class="form-label">Attribute Name</label>
         <input type="text" class="form-control" id="atribut_name" name="atribut_name" required>
-        <small class="text-muted">Setiap kata yang memiliki spasi harus diganti dengan tanda underscore ( _ ).  Contoh: printer epson harus diganti dengan printer_epson.</small>
+        <small class="text-muted">Any word that has spaces must be replaced with an underscore ( _ ). Ex: printer epson must be replaced with printer_epson.</small>
     </div>
     <div class="mb-3">
         <label for="goal" class="form-label">Goal</label>

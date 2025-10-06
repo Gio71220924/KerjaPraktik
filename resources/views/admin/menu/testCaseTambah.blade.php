@@ -1,8 +1,12 @@
 @extends('layouts.admin')
 
 @section('content')
-    <h1 class="mt-4">Add New Consultation</h1>
+@php
+    $userId = Auth::id(); // Ambil user ID yang sedang login
+    $latestConsultationId = DB::table("test_case_user_{$userId}")->max('case_id') ?? 0;
+@endphp
 
+<h1 class="mt-4">Add New Consultation for Id {{ $latestConsultationId + 1 }}</h1>
     @if ($errors->any())
         <div class="alert alert-danger">
                 @foreach ($errors->all() as $error)
@@ -33,6 +37,8 @@
 
                         <div class="form-group mb-4">
                             <label for="{{ $atribut->atribut_name }}">{{ ucfirst($atribut->atribut_name) }}</label>
+                            <br>
+                            <label for="{{ $atribut->atribut_desc }}">{{ ucfirst($atribut->atribut_desc) }}</label>
                             <select name="{{ $atribut->atribut_id }}_{{ $atribut->atribut_name }}" class="form-control" required>
                                 <option value="">Select an option</option>
                                 @foreach($values as $value)
@@ -47,9 +53,9 @@
             @endfor
         </div>
     
-        <button type="submit" name="action_type" value="matching" class="btn btn-primary">Matching Rule</button>
-        <button type="submit" name="action_type" value="fc" class="btn btn-primary">Forward Chaining</button>
-        <button type="submit" name="action_type" value="bc" class="btn btn-primary">Backward Chaining</button>
+        <button type="submit" name="action_type" value="Matching Rule" class="btn btn-primary">Matching Rule</button>
+        <button type="submit" name="action_type" value="Forward Chaining" class="btn btn-primary">Forward Chaining</button>
+        <button type="submit" name="action_type" value="Backward Chaining" class="btn btn-primary">Backward Chaining</button>
     </form>
     <br>
     {{-- <form action="#">

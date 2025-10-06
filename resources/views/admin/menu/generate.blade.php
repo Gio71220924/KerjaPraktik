@@ -36,6 +36,7 @@
         <button type="submit" class="btn btn-warning">Generate</button>
     </form>
     
+    {{-- <a href="{{ route('generate.case') }}" class="btn btn-primary mb-3">Generate</a> --}}
 {{-- 
     <a href="{{ url('/generateCase/' . Auth::id() . '/' . Auth::id()) }}" class="btn btn-warning">Generate</a>
      --}}

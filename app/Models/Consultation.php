@@ -34,6 +34,12 @@ class Consultation extends Model
     {
         return DB::table($this->table)->get(); // Ambil semua data dari tabel
     }
+
+    public function getAlgorithmByCaseId($caseId)
+    {
+        return DB::table($this->table)->where('case_id', $caseId)->value('algoritma');
+    }
+
     
     /**
      * Create table dynamically with attributes as columns.

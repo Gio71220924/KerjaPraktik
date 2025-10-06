@@ -6,6 +6,7 @@ use Illuminate\Routing\RouteGroup;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AtributController;
 use App\Http\Controllers\AtributValueController;
+use App\Http\Controllers\BCController;
 use App\Http\Controllers\CaseController;
 use App\Http\Controllers\CaseUserController;
 use App\Http\Controllers\ConsultationController;
@@ -74,6 +75,16 @@ Route::get('/forwardChaining', function () {
 });
 Route::get('/forwardChaining/{user_id}/{case_num}', [FCController::class, 'generateFC']);
 Route::post('/forwardChaining/{user_id}/{case_num}', [FCController::class, 'generateFC'])->name('inference.fc');
+//bc
+Route::get('/backward', function () {
+    return view('admin.menu.bc');
+});
+Route::get('/backwardChaining/{user_id}/{case_num}', [BCController::class, 'generateBC']);
+Route::post('/backwardChaining/{user_id}/{case_num}', [BCController::class, 'generateBC'])->name('inference.bc');
+//detail
+Route::get('/detail', function () {
+    return view('admin.menu.detail');
+});
 
 //profile
 Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

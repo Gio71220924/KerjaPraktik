@@ -6,19 +6,16 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
-class Inferensi extends Model
+class BackwardChaining extends Model
 {
-    // Primary key tabel
     protected $primaryKey = 'inf_id';
 
-    // Field yang dapat diisi (mass assignable)
     protected $fillable = [
         'case_goal',
         'rule_id',
         'rule_goal',
         'match_value',
         'cocok',
-        'waktu',
     ];
 
     // Menonaktifkan timestamps (created_at, updated_at)
@@ -28,7 +25,7 @@ class Inferensi extends Model
 
     public function setTableForUser($userId)
     {
-        $this->table = 'inferensi_user_' . $userId;
+        $this->table = 'inferensi_bc_user_' . $userId;
         return $this;
     }
 
@@ -49,5 +46,4 @@ class Inferensi extends Model
             return collect([]);
         }
     }
-
 }

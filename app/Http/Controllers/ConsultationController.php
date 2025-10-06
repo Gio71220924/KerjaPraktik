@@ -56,6 +56,7 @@ class ConsultationController extends Controller
         $data = [
             'user_id' => $user_id,
             'case_num' => $user_id,  // Mengambil nilai case_num
+            'algoritma' => $request->input('action_type')
         ];
     
         $queryCheck = DB::table($tableName)->where('user_id', $user_id);
@@ -99,14 +100,15 @@ class ConsultationController extends Controller
         // Ambil action_type untuk menentukan redirect
         $actionType = $request->input('action_type');
 
-        if ($actionType === 'matching') {
+        if ($actionType === 'Matching Rule') {
             return redirect()->route('inference.generate', ['user_id' => $user_id, 'case_num' => $user_id])
                 ->with('success', 'Matching Rule executed!');
-        } elseif ($actionType === 'fc') {
+        } elseif ($actionType === 'Forward Chaining') {
             return redirect()->route('inference.fc', ['user_id' => $user_id, 'case_num' => $user_id])
                 ->with('success', 'Forward Chaining executed!');
-        } elseif ($actionType === 'bc') {
-            return redirect()->route('/')->with('success', 'Backward Chaining executed!');
+        } elseif ($actionType === 'Backward Chaining') {
+            return redirect()->route('inference.bc', ['user_id' => $user_id, 'case_num' => $user_id])
+                ->with('success', 'Backward Chaining executed!');
         }
 
         return redirect()->back()->with('error', 'Invalid action!');

@@ -20,7 +20,7 @@ $user_id = $argv[1];
 $case_num = $argv[2];
 $awal = microtime(true);
 //create tabel temp utk menyimpan inferensi
-$tabelinferensi="inferensi_fc_user_".$user_id;
+$tabelinferensi="inferensi_bc_user_".$user_id;
 
 $result = $conn->query("SHOW TABLES LIKE '$tabelinferensi'");
 
@@ -74,7 +74,7 @@ if ($result->num_rows > 0) {
 // 1. Mengakses data kasus 
 $tabelkasus="test_case_user_".$user_id;
 $firstdata=1;
-$casedata = "select * from $tabelkasus WHERE algoritma = 'Forward Chaining'";
+$casedata = "select * from $tabelkasus WHERE algoritma = 'Backward Chaining'";
 if ($result=mysqli_query($conn,$casedata)){
     // menentukan banyak atribut
     $fieldcount=mysqli_num_fields($result);
@@ -123,7 +123,7 @@ while ($row= $casefactquery->fetch_assoc()) {
 // 2. lihat aturan pada rule base
     $hasilcocok=$cocok=$simpan=$matchvalue=$matchvaluebr=$prob=0;
     $tabelrule="rule_user_".$user_id;
-    $ruledata = $conn->query("select * from $tabelrule");
+    $ruledata = $conn->query("select * from $tabelrule order by then_part, length(if_part) - length(replace(if_part,'=',''))");
     while ($row= $ruledata->fetch_assoc()) {
         $rule_id=$row["rule_id"];
         $if_part=$row["if_part"];

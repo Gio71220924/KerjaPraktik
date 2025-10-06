@@ -48,11 +48,11 @@
                 <div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>
                 History
             </a>
-
+{{-- 
             <a class="nav-link" href="{{ url('forwardChaining') }}">
                 <div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>
                 Forward Chaining
-            </a>
+            </a> --}}
         </div>
     </div>
 </nav>

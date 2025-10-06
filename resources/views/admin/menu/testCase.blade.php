@@ -61,21 +61,22 @@
             <table class="table table-bordered">
                 <thead>
                     <tr>
-                        <th>No</th>
-                        <th>Case Title</th>
+                        <th>Id</th>
+                        {{-- <th>Case Title</th> --}}
                         @foreach($filteredColumns as $column)
                             @if(!in_array($column, $excludeColumns))
                                 <th>{{ (str_replace('_', ' ', preg_replace('/\b\d+_/', ' ', $column))) }}</th>
                             @endif
                         @endforeach
-                        <th>Action</th>
+                        <th>Algortihm</th>
+                        {{-- <th>Action</th> --}}
                     </tr>
                 </thead>
                 <tbody>
                     @foreach ($generateCase as $index => $row)
                         <tr>
-                            <td>{{ $generateCase->firstItem() + $index }}</td>
-                            <td>{{ $kasus->case_title }}</td>
+                            <td>{{ $row->case_id }}</td>
+                            {{-- <td>{{ $kasus->case_title }}</td> --}}
                             @foreach($filteredColumns as $column)
                                 @if(!in_array($column, $excludeColumns))
                                     <td>
@@ -88,14 +89,19 @@
                                     </td>
                                 @endif
                             @endforeach
-                            <td>
+                            @if(in_array('algoritma', $columns))
+                                <td>{{ $row->algoritma }}</td>
+                            @else
+                                <td>-</td> <!-- Placeholder jika kolom tidak ditemukan -->
+                            @endif
+                            {{-- <td>
                                 <a href="{{ route('test.case.edit', $row->case_id) }}" class="btn btn-warning btn-sm">Edit</a>
                                 <form action="{{ route('test.case.destroy', $row->case_id) }}" method="POST" style="display:inline;">
                                     @csrf
                                     @method('DELETE')
                                     <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure?')">Delete</button>
                                 </form>
-                            </td>                        
+                            </td>                         --}}
                         </tr>
                     @endforeach
                 </tbody>

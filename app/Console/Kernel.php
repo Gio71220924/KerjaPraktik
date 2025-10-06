@@ -2,6 +2,7 @@
 
 namespace App\Console;
 
+use App\Console\Commands\RunBC;
 use App\Console\Commands\RunBuatData;
 use App\Console\Commands\RunRule;
 use Illuminate\Console\Scheduling\Schedule;
@@ -19,6 +20,7 @@ class Kernel extends ConsoleKernel
         RunInference::class,
         RunBuatData::class,
         RunFC::class,
+        RunBC::class,
     ];
 
     // Menjadwalkan perintah (Jika perlu)

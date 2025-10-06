@@ -38,9 +38,10 @@ if ($result->num_rows > 0) {
             `rule_goal` varchar(200) NOT NULL,
             `match_value` decimal(5,4) NOT NULL,
             `cocok` enum('1','0') NOT NULL,
-            `user_id` int(11) NOT NULL
+            `user_id` int(11) NOT NULL,
+            `waktu` DECIMAL(16,14) NOT NULL DEFAULT 0
             )";
-
+    
     if ($conn->query($sql) === TRUE) {
         echo "create table successfully";
     } else {
@@ -79,7 +80,7 @@ $jlhmatcharray=count($matcharray);
 // 1. Mengakses data kasus 
 $tabelkasus="test_case_user_".$user_id;
 $firstdata=1;
-$casedata = "select * from $tabelkasus";
+$casedata = "SELECT * FROM $tabelkasus WHERE algoritma = 'Matching Rule'";
 if ($result=mysqli_query($conn,$casedata)){
     // menentukan banyak atribut
     $fieldcount=mysqli_num_fields($result);
@@ -163,9 +164,11 @@ while ($row= $matchquery->fetch_assoc()) {
         $cocok = '0'; // Simpan sebagai string
     }
     
+    $akhir = microtime(true);
+    $lama = $akhir - $awal;
     // Simpan hasil kecocokan fakta terbesar dalam tabel inferensi
-    $sql = "INSERT INTO $tabelinferensi (case_id, case_goal, rule_id, rule_goal, match_value, cocok, user_id)
-            VALUES ($case_id, '$goalstt', $rule_id, '$rule_goal', $match_value, '$cocok', $user_id)";
+    $sql = "INSERT INTO $tabelinferensi (inf_id, case_id, case_goal, rule_id, rule_goal, match_value, cocok, user_id, waktu)
+            VALUES ($case_id, $case_id, '$goalstt', $rule_id, '$rule_goal', $match_value, '$cocok', $user_id, $lama)";
     
     // if ($goalstt==$rule_goal)
     // {
@@ -185,9 +188,17 @@ while ($row= $matchquery->fetch_assoc()) {
     
     //echo "<br>";
 }
-$akhir = microtime(true);
-$lama = $akhir - $awal;
-echo "Lama eksekusi script adalah: ".$lama." microsecond";
+// $akhir = microtime(true);
+// $lama = $akhir - $awal;
+// echo "Lama eksekusi script adalah: ".$lama." microsecond";
+
+// $sql_update = "UPDATE $tabelinferensi SET waktu = $lama WHERE case_id = $case_id AND user_id = $user_id";
+// if (mysqli_query($conn, $sql_update)) {
+//     //echo "New record created successfully";
+// } else {
+//     echo "Error: " . $sql . "<br>" . mysqli_error($conn);
+// }
+
 // menampilkan isi array
 /*for ($brs = 0; $brs < 4; $brs++) {
     echo "<li>".$factnamearray[$brs]."</li>";
