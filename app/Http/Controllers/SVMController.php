@@ -14,41 +14,50 @@ class SVMController extends Controller
         $user_id = Auth::id();
         $tableName = 'svm_user_' . $user_id;
 
-        // Cek apakah tabel ada
         if (!Schema::hasTable($tableName)) {
-            // Tabel tidak tersedia
             $svmData = [];
-            $message = 'SVM data not found. Please click the Generate SVM button.';
+            $message = 'SVM data not found. Please click the "Generate SVM" button.';
         } else {
-            // Ambil data dari tabel
             $svmDataRaw = DB::table($tableName)->get();
-
             if ($svmDataRaw->isEmpty()) {
-                // Tabel ada tapi kosong
                 $svmData = [];
-                $message = 'SVM data not found. Please click the Generate SVM button.';
+                $message = 'No SVM data available. Please generate the model first.';
             } else {
-                // Proses data menjadi array yang dapat digunakan di view
                 $svmData = $svmDataRaw->toArray();
-                $message = null; // Tidak ada pesan jika data tersedia
+                $message = null;
             }
         }
 
         return view('admin.menu.svm', compact('svmData', 'message'));
     }
 
-    // public function generateSVM()
-    // {
-    //     $user_id = Auth::id();
-    //     $case_num = $user_id;
+    public function generateSVM()
+    {
+        $user_id = Auth::id();
+        $case_num = $user_id; // optional: bisa diubah nanti sesuai ID case terakhir
 
-    //     // Jalankan script untuk menghasilkan SVM
-    //     $command = 'php "' . base_path('scripts/svm/svm.php') . '" ' . $user_id . ' ' . $case_num;
-    //     shell_exec($command);
+        // Jalankan script PHP untuk melatih SVM
+        $command = 'php "' . base_path('app/scripts/decision-tree/svm.php') . '" ' . $user_id . ' ' . $case_num;
+        $output = shell_exec($command);
 
-    //     return redirect()->route('SVM.show')->with('success', 'SVM generated successfully.');
-    // }
-    
+        // Simpan hasil ke tabel log user (opsional)
+        $tableName = 'svm_user_' . $user_id;
+        if (!Schema::hasTable($tableName)) {
+            Schema::create($tableName, function ($table) {
+                $table->id();
+                $table->string('status');
+                $table->text('output')->nullable();
+                $table->timestamps();
+            });
+        }
+
+        DB::table($tableName)->insert([
+            'status' => 'SVM generated',
+            'output' => $output,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return redirect()->route('SVM.show')->with('success', 'SVM generated successfully.');
+    }
 }
-
-    

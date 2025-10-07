@@ -53,8 +53,9 @@ Route::delete('/generateCase/{case_id}', [CaseUserController::class, 'destroy'])
 Route::get('/tree', [DecisionTreeController::class, 'showTree'])->name('tree.show');
 Route::get('/tree/generate', [DecisionTreeController::class, 'generateTree'])->name('tree.generate');
 
-//SVM
+//SVM Model
 Route::get('/SupportVectorMachine', [SVMController::class, 'show'])->name('SVM.show');
+Route::get('/SupportVectorMachine/generate', [SVMController::class, 'generateSVM'])->name('SVM.generate');
 
 
 //rule
