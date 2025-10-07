@@ -49,7 +49,7 @@
                             </select>
                         </div>
                     @endfor
-                </div>
+                </div>  
             @endfor
         </div>
     
