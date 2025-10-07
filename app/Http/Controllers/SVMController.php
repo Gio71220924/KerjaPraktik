@@ -37,7 +37,7 @@ class SVMController extends Controller
         $case_num = $user_id; // optional: bisa diubah nanti sesuai ID case terakhir
 
         // Jalankan script PHP untuk melatih SVM
-        $command = 'php "' . base_path('app/scripts/decision-tree/svm.php') . '" ' . $user_id . ' ' . $case_num;
+        $command = 'php "' . base_path('app/scripts/decision-tree/SVM.php') . '" ' . $user_id . ' ' . $case_num;
         $output = shell_exec($command);
 
         // Simpan hasil ke tabel log user (opsional)
