@@ -1,3 +1,5 @@
+<!-- View  -->
+
 @extends('layouts.admin')
 
 @section ('content')
