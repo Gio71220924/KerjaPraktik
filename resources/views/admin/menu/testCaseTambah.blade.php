@@ -56,6 +56,7 @@
         <button type="submit" name="action_type" value="Matching Rule" class="btn btn-primary">Matching Rule</button>
         <button type="submit" name="action_type" value="Forward Chaining" class="btn btn-primary">Forward Chaining</button>
         <button type="submit" name="action_type" value="Backward Chaining" class="btn btn-primary">Backward Chaining</button>
+        <button type="submit" name="action_type" value="Support Vector Machine" class="btn btn-primary">Support Vector Machine</button>
     </form>
     <br>
     {{-- <form action="#">
