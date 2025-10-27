@@ -9,6 +9,9 @@
     @if(session('success'))
         <div class="alert alert-success">{{ session('success') }}</div>
     @endif
+    @if(session('svm_summary'))
+        <pre class="alert alert-info">{{ session('svm_summary') }}</pre>
+    @endif
     @if(session('error'))
         <div class="alert alert-danger">{{ session('error') }}</div>
     @endif
@@ -25,6 +28,8 @@
                 <tr>
                     <th>ID</th>
                     <th>Status</th>
+                    <th>Waktu (detik)</th>
+                    <th>Model Path</th>
                     <th>Output</th>
                     <th>Tanggal</th>
                 </tr>
@@ -34,7 +39,9 @@
                     <tr>
                         <td>{{ $item->id }}</td>
                         <td>{{ $item->status }}</td>
-                        <td><pre>{{ $item->output }}</pre></td>
+                        <td>{{ number_format($item->waktu ?? 0, 6) }}</td>
+                        <td class="text-break">{{ $item->model_path }}</td>
+                        <td><pre class="mb-0">{{ $item->output }}</pre></td>
                         <td>{{ $item->created_at }}</td>
                     </tr>
                 @endforeach
