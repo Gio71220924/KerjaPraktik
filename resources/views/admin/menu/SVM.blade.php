@@ -18,28 +18,38 @@
 
     <a href="{{ route('SVM.generate') }}" class="btn btn-primary mb-3">Generate / Train SVM</a>
 
-    @if(!empty($svmData))
+    @if(isset($svmData) && $svmData->isNotEmpty())
         <h5>Riwayat Training:</h5>
-        <table class="table table-bordered">
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Status</th>
-                    <th>Output</th>
-                    <th>Tanggal</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach($svmData as $item)
+        <div class="table-responsive">
+            <table class="table table-bordered align-middle">
+                <thead>
                     <tr>
-                        <td>{{ $item->id }}</td>
-                        <td>{{ $item->status }}</td>
-                        <td><pre>{{ $item->output }}</pre></td>
-                        <td>{{ $item->created_at }}</td>
+                        <th>ID</th>
+                        <th>Status</th>
+                        <th>Execution Time (detik)</th>
+                        <th>Model Path</th>
+                        <th>Output</th>
+                        <th>Tanggal</th>
                     </tr>
-                @endforeach
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach($svmData as $item)
+                        <tr>
+                            <td>{{ $item->id }}</td>
+                            <td>
+                                <span class="badge {{ $item->status === 'success' ? 'bg-success' : 'bg-danger' }}">
+                                    {{ ucfirst($item->status) }}
+                                </span>
+                            </td>
+                            <td>{{ $item->execution_time ? number_format($item->execution_time, 6) : '-' }}</td>
+                            <td class="text-break">{{ $item->model_path ?? '-' }}</td>
+                            <td><pre class="mb-0">{{ $item->output }}</pre></td>
+                            <td>{{ $item->created_at }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
     @endif
 </div>
 @endsection
