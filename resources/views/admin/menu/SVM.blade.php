@@ -20,13 +20,16 @@
 
     @if(!empty($svmData))
         <h5>Riwayat Training:</h5>
-        <table class="table table-bordered">
+        <table class="table table-bordered table-striped">
             <thead>
                 <tr>
                     <th>ID</th>
                     <th>Status</th>
+                    <th>Durasi (detik)</th>
+                    <th>Jumlah Data</th>
+                    <th>Lokasi Model</th>
                     <th>Output</th>
-                    <th>Tanggal</th>
+                    <th>Dibuat Pada</th>
                 </tr>
             </thead>
             <tbody>
@@ -34,7 +37,16 @@
                     <tr>
                         <td>{{ $item->id }}</td>
                         <td>{{ $item->status }}</td>
-                        <td><pre>{{ $item->output }}</pre></td>
+                        <td>{{ isset($item->duration) ? number_format($item->duration, 4) : '-' }}</td>
+                        <td>{{ $item->row_count ?? '-' }}</td>
+                        <td>
+                            @if(!empty($item->model_path))
+                                <code>{{ $item->model_path }}</code>
+                            @else
+                                -
+                            @endif
+                        </td>
+                        <td><pre class="mb-0">{{ $item->output }}</pre></td>
                         <td>{{ $item->created_at }}</td>
                     </tr>
                 @endforeach
