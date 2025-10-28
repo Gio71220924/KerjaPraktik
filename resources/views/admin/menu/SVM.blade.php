@@ -16,7 +16,7 @@
         <div class="alert alert-warning">{{ $message }}</div>
     @endif
 
-    <a href="{{ route('SVM.generate') }}" class="btn btn-primary mb-3">Generate / Train SVM</a>
+    <a href="{{ route('SVM.generate') }}" class="btn btn-primary mb-3">Train SVM</a>
 
     @if(!empty($svmData))
         <h5>Riwayat Training:</h5>
