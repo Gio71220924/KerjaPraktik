@@ -42,7 +42,7 @@ class SVMController extends Controller
 
         $svmData = DB::table($table)
             ->selectRaw(implode(", ", $selects))
-            ->orderByDesc($orderCol)
+            ->orderBy($orderCol, 'asc')
             ->get();
 
         return view('admin.menu.svm', [
