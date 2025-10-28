@@ -109,6 +109,8 @@ class ConsultationController extends Controller
         } elseif ($actionType === 'Backward Chaining') {
             return redirect()->route('inference.bc', ['user_id' => $user_id, 'case_num' => $user_id])
                 ->with('success', 'Backward Chaining executed!');
+        } elseif ($actionType === 'Support Vector Machine') {
+            return redirect()->route('SVM.generate');
         }
 
         return redirect()->back()->with('error', 'Invalid action!');
