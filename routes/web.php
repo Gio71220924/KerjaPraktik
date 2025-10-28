@@ -62,7 +62,9 @@ Route::get('/SupportVectorMachine/generate', [SVMController::class, 'generateSVM
 Route::get('/rule', function () {
     return view('admin.menu.rule');
 });
+
 Route::get('/rule/{user_id}/{case_num}', [RuleController::class, 'generateRule']);
+
 //consultation
 Route::get('/consultation', [ConsultationController::class, 'showConsultationForm'])->name('test.case.form');
 Route::post('/consultation/store', [ConsultationController::class, 'store'])->name('test.case.store');
@@ -70,22 +72,26 @@ Route::get('/consultation/new', [ConsultationController::class, 'create'])->name
 Route::get('/consultation/{case_id}/edit', [ConsultationController::class, 'edit'])->name('test.case.edit');
 Route::put('/consultation/{case_id}', [ConsultationController::class, 'update'])->name('test.case.update');
 Route::delete('/consultation/{case_id}', [ConsultationController::class, 'destroy'])->name('test.case.destroy');
+
 //inference
 Route::get('/inference', function () {
     return view('admin.menu.inferensi');
 });
+
 Route::get('/inference/{user_id}/{case_num}', [InferenceController::class, 'generateInference']);
 Route::post('/inference/{user_id}/{case_num}', [InferenceController::class, 'generate'])->name('inference.generate');
 //fc
 Route::get('/forwardChaining', function () {
     return view('admin.menu.fc');
 });
+
 Route::get('/forwardChaining/{user_id}/{case_num}', [FCController::class, 'generateFC']);
 Route::post('/forwardChaining/{user_id}/{case_num}', [FCController::class, 'generateFC'])->name('inference.fc');
 //bc
 Route::get('/backward', function () {
     return view('admin.menu.bc');
 });
+
 Route::get('/backwardChaining/{user_id}/{case_num}', [BCController::class, 'generateBC']);
 Route::post('/backwardChaining/{user_id}/{case_num}', [BCController::class, 'generateBC'])->name('inference.bc');
 //detail
@@ -120,5 +126,4 @@ Route::put('/user/{id}/inactivate', [UserController::class, 'inactive'])->name('
 //profile
 Route::get('/profile/admin', [ProfileAdminController::class, 'edit'])->name('profileAdmin.edit');
 Route::post('/profile/admin/update', [ProfileAdminController::class, 'update'])->name('profileAdmin.update');
-//
-
+//  
