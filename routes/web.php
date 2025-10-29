@@ -55,7 +55,7 @@ Route::get('/tree/generate', [DecisionTreeController::class, 'generateTree'])->n
 
 //SVM Model
 Route::get('/SupportVectorMachine', [SVMController::class, 'show'])->name('SVM.show');
-Route::get('/SupportVectorMachine/generate', [SVMController::class, 'generateSVM'])->name('SVM.generate');
+Route::post('/SupportVectorMachine/generate', [SVMController::class, 'generateSVM'])->name('SVM.generate'); // ← ganti ke POST
 
 
 //rule
