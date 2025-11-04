@@ -1,5 +1,5 @@
 <?php
-// php scripts/decision-tree/SVMInfer.php <user_id> <case_num> [--table=test_case_user_{id}]
+// php scripts/decision-tree/SVMInfer.php <user_id> <case_num> [--table=test_case_user_{id}] [--kernel=sgd]
 declare(strict_types=1);
 
 function envv(string $k, $d=null){
@@ -23,26 +23,56 @@ function table_exists(mysqli $db,string $schema,string $table):bool{
 }
 
 if (PHP_SAPI!=='cli' || $argc<3){
-  fwrite(STDERR,"Usage: php SVMInfer.php <user_id> <case_num> [--table=table_name]\n");
+  fwrite(STDERR,"Usage: php SVMInfer.php <user_id> <case_num> [--table=table_name] [--kernel=kernel_name]\n");
   exit(1);
 }
 $userId=(int)$argv[1];
 $caseNum=(int)$argv[2];
 $overrideTable=null;
-for($i=3;$i<$argc;$i++){ if (str_starts_with($argv[$i],'--table=')) $overrideTable=substr($argv[$i],8); }
+$preferredKernel=null;
+for($i=3;$i<$argc;$i++){
+  if (str_starts_with($argv[$i],'--table=')) {
+    $overrideTable=substr($argv[$i],8);
+  } elseif (str_starts_with($argv[$i],'--kernel=')) {
+    $preferredKernel=strtolower(trim(substr($argv[$i],9)));
+    if ($preferredKernel==='') $preferredKernel=null;
+  }
+}
 
 mysqli_report(MYSQLI_REPORT_ERROR|MYSQLI_REPORT_STRICT);
 $db=new mysqli($host,$username,$password,$database,$port);
 $db->set_charset('utf8mb4');
 
 $storageDir = function_exists('storage_path') ? storage_path('app/svm') : (getcwd().DIRECTORY_SEPARATOR.'svm_models');
-$candidates = [
-  $storageDir."/svm_user_{$userId}_sgd.json",
-  $storageDir."/svm_user_{$userId}_rbf.json",
-  $storageDir."/svm_user_{$userId}_sigmoid.json",
-];
-$modelPath=null; $model=null;
-foreach($candidates as $m){ if (is_file($m)) { $modelPath=$m; $model=json_decode(file_get_contents($m), true); break; } }
+// Jika diberikan --kernel=nama, prioritaskan file JSON dengan suffix kernel tersebut
+// (mis. svm_user_{id}_rbf.json). Bila tidak ditemukan, fallback ke daftar default.
+$candidateKernels=['sgd','rbf','sigmoid'];
+$candidates=[];
+if($preferredKernel){
+  $candidates[]=$storageDir."/svm_user_{$userId}_{$preferredKernel}.json";
+}
+foreach($candidateKernels as $k){
+  if($preferredKernel===$k) continue;
+  $candidates[]=$storageDir."/svm_user_{$userId}_{$k}.json";
+}
+$modelPath=null; $model=null; $chosenKernel=null;
+foreach($candidates as $m){
+  if (is_file($m)) {
+    $modelPath=$m; $model=json_decode(file_get_contents($m), true);
+    $chosenKernel=preg_match('#_([a-z0-9]+)\.json$#i',$m,$mm)?strtolower($mm[1]):null;
+    break;
+  }
+}
+$fallbackNote=null;
+if($preferredKernel){
+  if(!$model){
+    $fallbackNote="NOTE: Model kernel '{$preferredKernel}' tidak ditemukan, mencoba fallback kernel lain.";
+  } elseif($chosenKernel===null || $chosenKernel!==$preferredKernel){
+    $alt=$chosenKernel ?: 'lain';
+    $fallbackNote="NOTE: Model kernel '{$preferredKernel}' tidak ditemukan, memakai kernel '{$alt}'.";
+  }
+}
+if($fallbackNote){ fwrite(STDOUT,$fallbackNote."\n"); }
 if(!$model){ fwrite(STDERR,"Model JSON tidak ditemukan untuk user {$userId}.\n"); exit(1); }
 
 $W          = $model['weights'] ?? null;
