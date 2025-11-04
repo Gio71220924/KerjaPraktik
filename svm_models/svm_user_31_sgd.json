@@ -1,0 +1,31 @@
+{
+    "type": "svm_sgd",
+    "dim": 5,
+    "weights": [
+        -1.099340395762543,
+        1.199280431740955,
+        -0.19988007195682594,
+        0.2998201079352389,
+        0.099940035978413
+    ],
+    "bias_index": 4,
+    "lambda": 0.0001,
+    "epochs": 20,
+    "eta0": 0.1,
+    "goal_column": "197_makan",
+    "label_map": {
+        "+1": "327_Engga",
+        "-1": "326_Iya"
+    },
+    "feature_index": {
+        "CAT::198_Lapar::328_lapar": 0,
+        "CAT::198_Lapar::329_Tidak Lapar": 1,
+        "CAT::199_Kenyang::331_Tidak Kenyang": 2,
+        "CAT::199_Kenyang::330_Kenyang": 3
+    },
+    "numeric_minmax": [],
+    "kernel": "sgd",
+    "kernel_meta": {
+        "type": "sgd"
+    }
+}

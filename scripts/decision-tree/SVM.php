@@ -24,7 +24,7 @@ function envv(string $k, $d=null){
   return $d;
 }
 
-$SAVE_MODEL         = filter_var(envv('SVM_SAVE_MODEL','1'), FILTER_VALIDATE_BOOL);
+$SAVE_MODEL         = filter_var(envv('SVM_SAVE_MODEL','1'), FILTER_VALIDATE_BOOLEAN);
 $MODEL_DIR_FALLBACK = getcwd() . DIRECTORY_SEPARATOR . 'svm_models';
 
 ///////////////////////////// HELPERS /////////////////////////////////
