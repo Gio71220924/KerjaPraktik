@@ -129,6 +129,7 @@ class ConsultationController extends Controller
         // === Support Vector Machine (train → infer → insert ke inferensi_user_{userId} + diagnostics)
         if ($actionType === 'Support Vector Machine') {
             $kernel = $request->input('svm_kernel', 'sgd'); // contoh: sgd | rbf:D=1024:gamma=0.25 | sigmoid:D=...
+            $kernelShort = strtolower(explode(':', $kernel)[0]);
 
             $phpBin = $this->resolvePhpBinary();
 
@@ -136,6 +137,7 @@ class ConsultationController extends Controller
             $diag = [];
             $diag[] = $this->diagLine('User ID', (string)$user_id);
             $diag[] = $this->diagLine('Kernel', $kernel);
+            $diag[] = $this->diagLine('Kernel short', $kernelShort);
             $diag[] = $this->diagLine('PHP BIN', $phpBin, is_file($phpBin) || Str::startsWith($phpBin, 'php'));
 
             // Locate SVM.php
@@ -183,7 +185,14 @@ class ConsultationController extends Controller
             }
 
             // INFER
-            $inferCmd = [$phpBin, $inferScript, (string)$user_id, (string)$user_id, "--table={$table}"];
+            $inferCmd = [
+                $phpBin,
+                $inferScript,
+                (string) $user_id,
+                (string) $user_id,
+                "--table={$table}",
+                "--kernel={$kernelShort}",
+            ];
             $inferRes = $this->runProcess($inferCmd, 300);
             $diag[]   = $this->diagLine('Infer CMD', $inferRes['cmd'], $inferRes['ok']);
 
