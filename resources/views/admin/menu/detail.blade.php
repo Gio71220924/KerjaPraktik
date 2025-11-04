@@ -65,61 +65,73 @@
     <p class="alert alert-warning">You have no detail for Id {{ $selectedCaseId }}</p>
 @else
     <table class="table table-bordered">
+        <tbody>
         @foreach ($selectedInference as $detail)
-        <tr>
-            <th>Id</th>
-            <td>{{ $detail->case_id }}</td>
-        </tr>
-        <tr>
-            <th>Rule Id</th>
-            <td>{{ $detail->rule_id }}</td>
-        </tr>
-        <tr>
-            <th>Match Value</th>
-            <td>{{ $detail->match_value }}</td>
-        </tr>
-        @endforeach
+            <tr>
+                <th>Id</th>
+                <td>{{ $detail->case_id }}</td>
+            </tr>
+            <tr>
+                <th>Rule Id</th>
+                <td>{{ $detail->rule_id }}</td>
+            </tr>
+            <tr>
+                <th>Match Value</th>
+                <td>{{ number_format((float) $detail->match_value, 4, '.', '') }}</td>
+            </tr>
 
-        <tr>
-            <td colspan="100%">Your Consultation </td>
-        </tr>
-        
-        @foreach ($testCases as $index => $row)
-        {{-- Tambahkan bagian ini untuk menampilkan kolom yang difilter --}}
-            @foreach($filteredColumns as $column)
-            @if(!in_array($column, $excludeColumns))
-                    <th>{{ str_replace('_', ' ', preg_replace('/\b\d+_/', ' ', $column)) }}</th>
-                    <td>
-                        @php
-                            $cleanedIfPart = preg_replace('/\b\d+_/', ' ', $row->$column,);
-                            $cleanedIfPart = str_replace('_', ' ', $cleanedIfPart);
-                            $cleanedIfPart = str_replace('-', ' ', $cleanedIfPart);
-                        @endphp
-                        {{ $cleanedIfPart }}
-                    </td>
-                </tr>
+            <tr>
+                <th colspan="2">Your Consultation</th>
+            </tr>
+
+            @foreach ($testCases as $index => $row)
+                @if ($testCases->count() > 1)
+                    <tr>
+                        <th colspan="2">Consultation {{ $index + 1 }}</th>
+                    </tr>
                 @endif
+
+                @foreach ($filteredColumns as $column)
+                    @if (!in_array($column, $excludeColumns))
+                        @php
+                            $label = str_replace('_', ' ', preg_replace('/\b\d+_/', ' ', $column));
+                            $label = preg_replace('/\s+/', ' ', trim($label));
+                            $value = preg_replace('/\b\d+_/', ' ', $row->$column);
+                            $value = str_replace(['_', '-'], ' ', $value);
+                            $value = preg_replace('/\s+/', ' ', trim($value));
+                        @endphp
+                        <tr>
+                            <th>{{ $label }}</th>
+                            <td>{{ $value }}</td>
+                        </tr>
+                    @endif
+                @endforeach
             @endforeach
+
+            <tr>
+                <th colspan="2">Your Consultation Goal</th>
+            </tr>
+
+            @php
+                $goal = str_replace(['_', '-', '='], [' ', ' ', ' ='], preg_replace('/\b\d+_/', ' ', $detail->rule_goal));
+                $algorithmName = $algorithms[$detail->case_id] ?? 'Unknown';
+                $algorithmName = ucwords(str_replace(['_', '-'], ' ', $algorithmName));
+            @endphp
+
+            <tr>
+                <th>Goal</th>
+                <td>{{ $goal }}</td>
+            </tr>
+            <tr>
+                <th>Algorithm</th>
+                <td>{{ $algorithmName }}</td>
+            </tr>
+            <tr>
+                <th>Execution Time</th>
+                <td>{{ $detail->waktu }}</td>
+            </tr>
         @endforeach
-        <br>
-        <tr>
-            <td colspan="100%">Your Consultation Goal</td>
-        </tr>
-        
-        @foreach ($selectedInference as $detail)
-        <tr>
-            <th>Goal</th>
-            <td>{{ str_replace(['_', '-', '='], [' ', ' ', ' ='], preg_replace('/\b\d+_/', ' ', $detail->rule_goal)) }}</td>
-        </tr>
-        <tr>
-            <th>Algorithm</th>
-            <td>{{ $algorithms[$detail->case_id] ?? 'Unknown' }}</td>
-        </tr>
-        <tr>
-            <th>Execution Time</th>
-            <td>{{ $detail->waktu }}</td>
-        </tr>
-        @endforeach
+        </tbody>
     </table>
 @endif
 
