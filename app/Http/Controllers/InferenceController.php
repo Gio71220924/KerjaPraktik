@@ -9,11 +9,10 @@ class InferenceController extends Controller
 {
     public function generateInference($user_id, $case_num)
     {
-        $user_id = Auth::id();  // Mendapatkan user_id dari user yang sedang login
-        $case_num = $user_id;    // Menetapkan case_num sama dengan user_id
+        $user_id  = Auth::user()->user_id;  // ← konsisten
+        $case_num = $user_id;
 
         $command = 'php "' . base_path('scripts/decision-tree/matching_rule.php') . '" ' . $user_id . ' ' . $case_num;
-
         $output = shell_exec($command);
 
         return view('admin.menu.inferensi', compact('output', 'case_num'))->with('success', 'Inference updated successfully!'); 
@@ -21,15 +20,12 @@ class InferenceController extends Controller
 
     public function generate($user_id, $case_num)
     {
-        $user_id = Auth::id();  // Mendapatkan user_id dari user yang sedang login
-        $case_num = $user_id;    // Menetapkan case_num sama dengan user_id
+        $user_id  = Auth::user()->user_id;  // ← konsisten
+        $case_num = $user_id;
 
         $command = 'php "' . base_path('scripts/decision-tree/matching_rule.php') . '" ' . $user_id . ' ' . $case_num;
-
         $output = shell_exec($command);
 
-        // Kembalikan ke view inferensi
         return view('admin.menu.inferensi', compact('output', 'case_num'))->with('success', 'Inference updated successfully!');
     }
-
 }

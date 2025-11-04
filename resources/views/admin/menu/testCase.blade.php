@@ -50,7 +50,7 @@
 
     @if (!$tableExists)
         <ol class="breadcrumb mb-4">
-            <li class="breadcrumb-item active">There is no case for this user.</li>
+            <li class="breadcrumb-item active">There is no case f   or this user.</li>
         </ol>
     @elseif ($generateCase->isEmpty())
         <ol class="breadcrumb mb-4">

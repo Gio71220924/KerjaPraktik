@@ -16,8 +16,22 @@
     @endif
 
     <form action="{{ route('test.case.store') }}" method="POST">
-        {{-- {{ route('inference.generate', ['user_id' => Auth::id(), 'case_num' => Auth::id()]) }} --}}
         @csrf
+
+        {{-- ====== Tambahan: Pilih Kernel untuk SVM ====== --}}
+        <div class="card mb-3">
+          <div class="card-body">
+            <label class="form-label">SVM Kernel</label>
+            <select name="svm_kernel" id="svm_kernel" class="form-select" aria-label="SVM kernel">
+              <option value="sgd" selected>SGD (Linear)</option>
+              <option value="rbf:D=1024:gamma=0.25">RBF — D=1024, γ=0.25</option>
+              <option value="sigmoid:D=1024:scale=1.0:coef0=0.0">Sigmoid — D=1024, scale=1.0, coef0=0.0</option>
+            </select>
+            <small class="text-muted">Pilihan ini hanya dipakai jika kamu menekan tombol “Support Vector Machine”.</small>
+          </div>
+        </div>
+        {{-- =============================================== --}}
+
         <div class="row">
             @php
                 $atributCount = count($atributs); // Total atribut
@@ -58,12 +72,4 @@
         <button type="submit" name="action_type" value="Backward Chaining" class="btn btn-primary">Backward Chaining</button>
         <button type="submit" name="action_type" value="Support Vector Machine" class="btn btn-primary">Support Vector Machine</button>
     </form>
-    <br>
-    {{-- <form action="#">
-        <button type="submit" name="action_type" value="fc" class="btn btn-primary">Forward Chaining</button>
-    </form>
-    <br>
-    <form action="#">
-        <button type="submit" name="action_type" value="bc" class="btn btn-primary">Backward Chaining</button>
-    </form> --}}
 @endsection

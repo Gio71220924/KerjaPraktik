@@ -1,4 +1,3 @@
-{{-- resources/views/svm/index.blade.php --}}
 @extends('layouts.admin')
 
 @section('content')
@@ -6,7 +5,7 @@
   <h2>Support Vector Machine (SVM)</h2>
   <hr>
 
-  {{-- Flash messages --}}
+  {{-- Flash --}}
   @if(session('svm_ok'))
     <div class="alert alert-success"><pre class="mb-0">{{ session('svm_ok') }}</pre></div>
   @endif
@@ -14,78 +13,113 @@
     <div class="alert alert-danger"><pre class="mb-0">{{ session('svm_err') }}</pre></div>
   @endif
 
-  @if(session('success'))
-    <div class="alert alert-success">{{ session('success') }}</div>
-  @endif
-  @if(session('error'))
-    <div class="alert alert-danger">{{ session('error') }}</div>
-  @endif
-  @isset($message)
-    <div class="alert alert-warning">{{ $message }}</div>
-  @endisset
-
-  {{-- Form Train SVM --}}
-  <form action="{{ route('SVM.generate') }}" method="POST" class="mb-4" id="svmTrainForm">
-    @csrf
-    @php
-      $uid = Auth::id();
-      // Jika kamu punya case_id terakhir, bisa pakai itu. Default pakai user_id.
-      $caseNumDefault = $uid;
-    @endphp
-    <input type="hidden" name="user_id" value="{{ $uid }}">
-    <input type="hidden" name="case_num" value="{{ $caseNumDefault }}">
-    <input type="hidden" name="kernel" id="kernelInput" value="sgd">
-
-    <div class="row g-3 align-items-end">
-      <div class="col-md-4">
-        <label class="form-label">Pilih Kernel</label>
-        <select id="kernelSelect" class="form-select" required>
-          <option value="sgd" selected>SGD (Linear)</option>
-          <option value="rbf:D=1024:gamma=0.25">RBF — D=1024, γ=0.25</option>
-          <option value="sigmoid:D=1024:scale=1.0:coef0=0.0">Sigmoid — D=1024, scale=1.0, coef0=0.0</option>
-          <option value="custom">Custom…</option>
-        </select>
-        <small class="text-muted">Format internal: <code>sgd</code>, <code>rbf:D=...:gamma=...</code>, <code>sigmoid:D=...:scale=...:coef0=...</code></small>
-      </div>
-
-      {{-- Panel Custom --}}
-      <div class="col-12"></div>
-      <div class="col-md-3 d-none" id="customTypeWrap">
-        <label class="form-label">Tipe Custom</label>
-        <select id="customType" class="form-select">
-          <option value="rbf" selected>rbf</option>
-          <option value="sigmoid">sigmoid</option>
-          <option value="sgd">sgd</option>
-        </select>
-      </div>
-
-      <div class="col-md-2 d-none" id="customDWrap">
-        <label class="form-label">D (dimensi)</label>
-        <input type="number" min="1" step="1" id="customD" class="form-control" value="1024">
-      </div>
-
-      <div class="col-md-2 d-none" id="customGammaWrap">
-        <label class="form-label">gamma (RBF)</label>
-        <input type="number" step="0.01" id="customGamma" class="form-control" value="0.25">
-      </div>
-
-      <div class="col-md-2 d-none" id="customScaleWrap">
-        <label class="form-label">scale (Sigmoid)</label>
-        <input type="number" step="0.1" id="customScale" class="form-control" value="1.0">
-      </div>
-
-      <div class="col-md-2 d-none" id="customCoef0Wrap">
-        <label class="form-label">coef0 (Sigmoid)</label>
-        <input type="number" step="0.1" id="customCoef0" class="form-control" value="0.0">
-      </div>
-
-      <div class="col-md-3">
-        <button type="submit" class="btn btn-primary w-100">Train SVM</button>
-      </div>
+  {{-- ======== TRAIN MANUAL (case_num & sumber training otomatis) ======== --}}
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">Train (Otomatis: case_user_{userId})</div>
+    <div class="card-body">
+      <form action="{{ route('SVM.generate') }}" method="POST" class="row g-3">
+        @csrf
+        {{-- case_num & table override tidak perlu, semuanya otomatis --}}
+        <div class="col-md-6">
+          <label class="form-label">Kernel</label>
+          <select name="kernel" class="form-select">
+            <option value="sgd">SGD (Linear)</option>
+            <option value="rbf:D=1024:gamma=0.25">RBF — D=1024, γ=0.25</option>
+            <option value="sigmoid:D=1024:scale=1.0:coef0=0.0">Sigmoid — D=1024, scale=1.0, coef0=0.0</option>
+          </select>
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+          <button class="btn btn-primary w-100">Train</button>
+        </div>
+      </form>
+      <small class="text-muted">Sumber training otomatis: <code>case_user_{{ Auth::id() }}</code>. case_num otomatis: <code>{{ Auth::id() }}</code>.</small>
     </div>
-  </form>
+  </div>
 
-  {{-- Riwayat Training --}}
+  {{-- ======== PREDICT DARI INPUT ATRIBUT (tanpa Goal, tanpa Sumber Training) ======== --}}
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">Predict dari Input Atribut</div>
+    <div class="card-body">
+      <form action="{{ route('SVM.storeCase') }}" method="POST" id="svmPredictForm">
+        @csrf
+
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">Kernel</label>
+            <select name="kernel" id="kernelSelect" class="form-select" required>
+              <option value="sgd" selected>SGD (Linear)</option>
+              <option value="rbf:D=1024:gamma=0.25">RBF — D=1024, γ=0.25</option>
+              <option value="sigmoid:D=1024:scale=1.0:coef0=0.0">Sigmoid — D=1024, scale=1.0, coef0=0.0</option>
+              <option value="custom">Custom…</option>
+            </select>
+            <small class="text-muted">Format: <code>sgd</code>, <code>rbf:D=...:gamma=...</code>, <code>sigmoid:D=...:scale=...:coef0=...</code></small>
+          </div>
+
+          {{-- Panel Custom Kernel --}}
+          <div class="col-12"></div>
+          <div class="col-md-2 d-none" id="customTypeWrap">
+            <label class="form-label">Tipe Custom</label>
+            <select id="customType" class="form-select">
+              <option value="rbf" selected>rbf</option>
+              <option value="sigmoid">sigmoid</option>
+              <option value="sgd">sgd</option>
+            </select>
+          </div>
+          <div class="col-md-2 d-none" id="customDWrap">
+            <label class="form-label">D</label>
+            <input type="number" min="1" step="1" id="customD" class="form-control" value="1024">
+          </div>
+          <div class="col-md-2 d-none" id="customGammaWrap">
+            <label class="form-label">gamma (RBF)</label>
+            <input type="number" step="0.01" id="customGamma" class="form-control" value="0.25">
+          </div>
+          <div class="col-md-2 d-none" id="customScaleWrap">
+            <label class="form-label">scale (Sigmoid)</label>
+            <input type="number" step="0.1" id="customScale" class="form-control" value="1.0">
+          </div>
+          <div class="col-md-2 d-none" id="customCoef0Wrap">
+            <label class="form-label">coef0 (Sigmoid)</label>
+            <input type="number" step="0.1" id="customCoef0" class="form-control" value="0.0">
+          </div>
+
+          <input type="hidden" name="kernel" id="kernelHidden" value="sgd">
+        </div>
+
+        <hr>
+
+        {{-- Atribut non-goal (dari tabel atribut) --}}
+        @if(!empty($atributs) && count($atributs) > 0)
+          <div class="mb-3">
+            <h6 class="mb-2">Atribut</h6>
+            <div class="row g-3">
+              @foreach($atributs as $a)
+                @php $vals = $valuesByAttr[$a->atribut_id] ?? collect(); @endphp
+                <div class="col-md-4">
+                  <label class="form-label">{{ ucfirst($a->atribut_name) }}</label>
+                  <select name="attr[{{ $a->atribut_id }}]" class="form-select">
+                    <option value="">-- pilih --</option>
+                    @foreach($vals as $v)
+                      <option value="{{ $v->value_id.'_'.$v->value_name }}">
+                        {{ explode('_', $v->value_name, 2)[1] ?? $v->value_name }}
+                      </option>
+                    @endforeach
+                  </select>
+                  <small class="text-muted">Kolom: <code>{{ $a->atribut_id.'_'.$a->atribut_name }}</code></small>
+                </div>
+              @endforeach
+            </div>
+          </div>
+        @endif
+
+        {{-- Tidak ada Goal & Tidak ada input kolom case_user --}}
+        <div class="mt-2">
+          <button class="btn btn-primary">Generate & Predict</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {{-- Riwayat --}}
   @if(!empty($svmData) && count($svmData) > 0)
     <h5>Riwayat Training:</h5>
     <div class="table-responsive">
@@ -103,7 +137,7 @@
             <tr>
               <td>{{ $item->id }}</td>
               <td>
-                <span class="badge {{ $item->status === 'success' ? 'bg-success' : 'bg-danger' }}">
+                <span class="badge {{ $item->status === 'success' ? 'bg-success' : ($item->status === 'case' ? 'bg-info' : 'bg-danger') }}">
                   {{ $item->status }}
                 </span>
               </td>
@@ -119,68 +153,58 @@
   @endif
 </div>
 
-{{-- JS kecil untuk compose kernel --}}
+{{-- JS untuk compose custom kernel --}}
 <script>
 (function(){
   const sel = document.getElementById('kernelSelect');
-  const inputKernel = document.getElementById('kernelInput');
+  const hidden = document.getElementById('kernelHidden');
 
-  const customTypeWrap  = document.getElementById('customTypeWrap');
-  const customDWrap     = document.getElementById('customDWrap');
-  const customGammaWrap = document.getElementById('customGammaWrap');
-  const customScaleWrap = document.getElementById('customScaleWrap');
-  const customCoef0Wrap = document.getElementById('customCoef0Wrap');
+  const wrap = {
+    type:  document.getElementById('customTypeWrap'),
+    D:     document.getElementById('customDWrap'),
+    gamma: document.getElementById('customGammaWrap'),
+    scale: document.getElementById('customScaleWrap'),
+    coef0: document.getElementById('customCoef0Wrap'),
+  };
+  const fld = {
+    type:  document.getElementById('customType'),
+    D:     document.getElementById('customD'),
+    gamma: document.getElementById('customGamma'),
+    scale: document.getElementById('customScale'),
+    coef0: document.getElementById('customCoef0'),
+  };
 
-  const customType  = document.getElementById('customType');
-  const customD     = document.getElementById('customD');
-  const customGamma = document.getElementById('customGamma');
-  const customScale = document.getElementById('customScale');
-  const customCoef0 = document.getElementById('customCoef0');
-
-  function toggleCustom(show) {
-    [customTypeWrap, customDWrap].forEach(el => el.classList.toggle('d-none', !show));
-    // RBF fields
-    customGammaWrap.classList.toggle('d-none', !show || customType.value !== 'rbf');
-    // Sigmoid fields
-    const showSig = show && customType.value === 'sigmoid';
-    customScaleWrap.classList.toggle('d-none', !showSig);
-    customCoef0Wrap.classList.toggle('d-none', !showSig);
+  function toggleCustom(show){
+    [wrap.type, wrap.D].forEach(e => e.classList.toggle('d-none', !show));
+    wrap.gamma.classList.toggle('d-none', !show || fld.type.value !== 'rbf');
+    const showSig = show && fld.type.value === 'sigmoid';
+    wrap.scale.classList.toggle('d-none', !showSig);
+    wrap.coef0.classList.toggle('d-none', !showSig);
   }
-
-  function composeKernel() {
-    if (sel.value !== 'custom') {
-      inputKernel.value = sel.value;
-      return;
-    }
-    const t = customType.value;
+  function compose(){
+    if (sel.value !== 'custom') { hidden.value = sel.value; return; }
+    const t = fld.type.value;
     if (t === 'sgd') {
-      inputKernel.value = 'sgd';
+      hidden.value = 'sgd';
     } else if (t === 'rbf') {
-      const D = Math.max(1, parseInt(customD.value||'1024', 10));
-      const g = parseFloat(customGamma.value||'0.25');
-      inputKernel.value = `rbf:D=${D}:gamma=${g}`;
+      const D = Math.max(1, parseInt(fld.D.value||'1024', 10));
+      const g = parseFloat(fld.gamma.value||'0.25');
+      hidden.value = `rbf:D=${D}:gamma=${g}`;
     } else if (t === 'sigmoid') {
-      const D = Math.max(1, parseInt(customD.value||'1024', 10));
-      const s = parseFloat(customScale.value||'1.0');
-      const c = parseFloat(customCoef0.value||'0.0');
-      inputKernel.value = `sigmoid:D=${D}:scale=${s}:coef0=${c}`;
+      const D = Math.max(1, parseInt(fld.D.value||'1024', 10));
+      const s = parseFloat(fld.scale.value||'1.0');
+      const c = parseFloat(fld.coef0.value||'0.0');
+      hidden.value = `sigmoid:D=${D}:scale=${s}:coef0=${c}`;
     }
   }
 
-  // init
-  inputKernel.value = sel.value;
-  toggleCustom(false);
-  composeKernel();
+  hidden.value = sel.value;
+  toggleCustom(false); compose();
 
-  // events
-  sel.addEventListener('change', () => {
-    const isCustom = sel.value === 'custom';
-    toggleCustom(isCustom);
-    composeKernel();
-  });
-  [customType, customD, customGamma, customScale, customCoef0].forEach(el => {
-    el.addEventListener('input', composeKernel);
-    el.addEventListener('change', composeKernel);
+  sel.addEventListener('change', ()=>{ toggleCustom(sel.value==='custom'); compose(); });
+  [fld.type, fld.D, fld.gamma, fld.scale, fld.coef0].forEach(el=>{
+    el.addEventListener('input', compose);
+    el.addEventListener('change', compose);
   });
 })();
 </script>

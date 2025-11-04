@@ -54,8 +54,14 @@ Route::get('/tree', [DecisionTreeController::class, 'showTree'])->name('tree.sho
 Route::get('/tree/generate', [DecisionTreeController::class, 'generateTree'])->name('tree.generate');
 
 //SVM Model
+// Route::get('/SupportVectorMachine', [SVMController::class, 'show'])->name('SVM.show');
+// Route::post('/SupportVectorMachine/generate', [SVMController::class, 'generateSVM'])->name('SVM.generate'); // ← ganti ke POST
+// Route::post('/SupportVectorMachine/predict', [SVMController::class, 'predictOnly'])->name('SVM.predict');
+
 Route::get('/SupportVectorMachine', [SVMController::class, 'show'])->name('SVM.show');
-Route::post('/SupportVectorMachine/generate', [SVMController::class, 'generateSVM'])->name('SVM.generate'); // ← ganti ke POST
+Route::post('/SupportVectorMachine/generate', [SVMController::class, 'generateSVM'])->name('SVM.generate');
+Route::post('/SupportVectorMachine/store', [SVMController::class, 'storeCaseAndTrain'])->name('SVM.storeCase');
+
 
 
 //rule
