@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\SvmModelLocator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
@@ -348,9 +349,18 @@ class ConsultationController extends Controller
 
     private function modelPathGuess(int $userId, string $kernel): string
     {
-        $storageDir = function_exists('storage_path') ? storage_path('app/svm') : base_path('svm_models');
-        $short = strtolower(explode(':', $kernel)[0]);
-        return rtrim($storageDir, '/\\')."/svm_user_{$userId}_{$short}.json";
+        $short    = strtolower(explode(':', $kernel)[0]);
+        $fileName = "svm_user_{$userId}_{$short}.json";
+        $located  = SvmModelLocator::locate($fileName);
+
+        if ($located !== null) {
+            return $located;
+        }
+
+        $dirs = SvmModelLocator::directories();
+        $fallbackDir = $dirs[0] ?? (function_exists('base_path') ? base_path('svm_models') : getcwd());
+
+        return rtrim($fallbackDir, '/\\') . DIRECTORY_SEPARATOR . $fileName;
     }
 
     private function resolvePhpBinary(): string

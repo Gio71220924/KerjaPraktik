@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\SvmModelLocator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -446,16 +447,21 @@ class SVMController extends Controller
     /** Prediksi dari model JSON */
     private function predictFromForm(int $userId, string $kernel, array $inputAttr, string $goalCol): array
     {
-        $storageDir = function_exists('storage_path') ? storage_path('app/svm') : base_path('svm_models');
         $kernelShort = explode(':', $kernel)[0];
-        $modelPath  = rtrim($storageDir, '/\\') . "/svm_user_{$userId}_{$kernelShort}.json";
-        if (!is_file($modelPath)) {
+        $fileName = "svm_user_{$userId}_{$kernelShort}.json";
+        $modelPath = SvmModelLocator::locate($fileName);
+
+        if ($modelPath === null) {
+            $checked = array_map(
+                fn($dir) => rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . $fileName,
+                SvmModelLocator::directories()
+            );
             return [
                 'label'   => 'UNKNOWN',
                 'margin'  => 0.0,
                 'goal_key'=> $goalCol,
                 'kernel'  => $kernelShort,
-                'summary' => "Model tidak ditemukan: {$modelPath}"
+                'summary' => "Model tidak ditemukan: " . implode(', ', $checked)
             ];
         }
 
