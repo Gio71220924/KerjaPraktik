@@ -5,84 +5,110 @@
 
 @php
     use Illuminate\Support\Facades\Auth;
+    use Illuminate\Support\Facades\Schema;
 
     $user = Auth::user();
 
-    // Ambil data dari inferensi_user_{userId}
-    $inferensi = new \App\Models\Inferensi();
-    $inferensi->setTableForUser($user->user_id);
-    $tableExists1 = $inferensi->tableExists();
-    $inference1 = $tableExists1 ? $inferensi->getRules() : collect();
+    // === Ambil data dari 3 sumber: inferensi_user, inferensi_fc_user, inferensi_bc_user ===
+    $mdlInf = new \App\Models\Inferensi();
+    $mdlInf->setTableForUser($user->user_id);
+    $t1Exists = $mdlInf->tableExists();
+    $rows1    = $t1Exists ? $mdlInf->getRules() : collect();
 
-    // Ambil data dari inferensi_fc_user_{userId}
-    $inferensiFC = new \App\Models\ForwardChaining();
-    $inferensiFC->setTableForUser($user->user_id);
-    $tableExists2 = $inferensiFC->tableExists();
-    $inference2 = $tableExists2 ? $inferensiFC->getRules() : collect();
+    $mdlFC = new \App\Models\ForwardChaining();
+    $mdlFC->setTableForUser($user->user_id);
+    $t2Exists = $mdlFC->tableExists();
+    $rows2    = $t2Exists ? $mdlFC->getRules() : collect();
 
-    // Ambil data dari inferensi_bc_user_{userId}
-    $inferensiBC = new \App\Models\BackwardChaining();
-    $inferensiBC->setTableForUser($user->user_id);
-    $tableExists3 = $inferensiBC->tableExists();
-    $inference3 = $tableExists3 ? $inferensiBC->getRules() : collect();
+    $mdlBC = new \App\Models\BackwardChaining();
+    $mdlBC->setTableForUser($user->user_id);
+    $t3Exists = $mdlBC->tableExists();
+    $rows3    = $t3Exists ? $mdlBC->getRules() : collect();
 
-    // Gabungkan semua hasil inferensi
-    $allInference = $inference1->merge($inference2)->merge($inference3)->sortBy('case_id');
+    // === Gabung semua hasil ===
+    $all = $rows1->merge($rows2)->merge($rows3)
+                 ->sortBy(fn($r) => sprintf('%020s-%020s', $r->case_id ?? '', $r->inf_id ?? 0))
+                 ->values();
 
-    // Case title (optional)
+    // Case title (opsional)
     $kasus = \App\Models\Kasus::where('case_num', $user->user_id)->first();
 
-    // Ambil algoritma dari test_case_user_{userId} untuk mapping (Matching Rule/FC/BC)
-    $generate = new \App\Models\Consultation();
+    // Ambil algoritma dari test_case_user_{userId} untuk mapping label kolom "Algorithm"
+    $generate   = new \App\Models\Consultation();
     $generate->setTableForUser($user->user_id);
-    $tableExistss = $generate->tableExists();
-    $testCases = $tableExistss ? $generate->getRules() : collect();
+    $tcExists   = $generate->tableExists();
+    $testCases  = $tcExists ? $generate->getRules() : collect();
     $algorithms = $testCases->pluck('algoritma', 'case_id')->toArray();
 
-    // Helper: render algoritma dengan fallback SVM
+    // Helper render algoritma (fallback SVM jika rule_id = 'SVM')
     $renderAlgo = function($row) use ($algorithms) {
-        // Jika sudah ada mapping dari test_case_user, pakai itu
-        if (isset($algorithms[$row->case_id]) && $algorithms[$row->case_id] !== null && $algorithms[$row->case_id] !== '') {
-            return $algorithms[$row->case_id];
+        $cid = $row->case_id ?? null;
+        if ($cid !== null && isset($algorithms[$cid]) && $algorithms[$cid] !== '') {
+            return $algorithms[$cid];
         }
-        // Fallback: kalau baris ini dari SVMController (rule_id = 'SVM'), tampilkan "Support Vector Machine"
         if (isset($row->rule_id) && strtoupper((string)$row->rule_id) === 'SVM') {
             return 'Support Vector Machine';
         }
-        // Default
         return 'Unknown';
     };
+
+    // Ringkasan jumlah per sumber (untuk badge)
+    $cInfer = $rows1->count();
+    $cFC    = $rows2->count();
+    $cBC    = $rows3->count();
+    $cAll   = $all->count();
 @endphp
 
-<h1 class="mt-4">Inferensi for User: {{ $user->username }}</h1>
+<h1 class="mt-4">Inferensi — {{ $user->username }}</h1>
 
+{{-- Alert hasil aksi --}}
 @if(session('success'))
   <div class="alert alert-success">{{ session('success') }}</div>
 @endif
 @if(session('error'))
-  <div class="alert alert-danger">{{ session('error') }}</div>
+  <div class="alert alert-danger" style="white-space:pre-wrap">{{ session('error') }}</div>
 @endif
 
-<br>
+{{-- Panel diagnostik SVM (jika ada) --}}
+@if(session('svm_diag'))
+  <div class="alert alert-secondary mt-2">
+    <details open>
+      <summary><strong>Diagnostics</strong> (klik untuk sembunyikan)</summary>
+      <pre class="mt-2" style="white-space:pre-wrap">{{ session('svm_diag') }}</pre>
+    </details>
+  </div>
+@endif
 
-@if (!$tableExists1 && !$tableExists2 && !$tableExists3)
-  <ol class="breadcrumb mb-4">
-      <li class="breadcrumb-item active">There is no inference for this user.</li>
-  </ol>
-@elseif ($allInference->isEmpty())
-  <ol class="breadcrumb mb-4">
-      <li class="breadcrumb-item active">There is no inference for this user.</li>
-  </ol>
+{{-- Ringkasan jumlah --}}
+<div class="mb-3 d-flex flex-wrap gap-2">
+  <span class="badge text-bg-primary">Total: {{ $cAll }}</span>
+  <span class="badge text-bg-success">inferensi_user: {{ $cInfer }}</span>
+  <span class="badge text-bg-info">inferensi_fc_user: {{ $cFC }}</span>
+  <span class="badge text-bg-warning">inferensi_bc_user: {{ $cBC }}</span>
+</div>
+
+{{-- Tombol kecil utilitas --}}
+<div class="mb-3 d-flex gap-2">
+  <a href="{{ url()->current() }}" class="btn btn-sm btn-outline-secondary">Refresh</a>
+  @if ($tcExists)
+    <a href="{{ route('test.case.form') }}" class="btn btn-sm btn-outline-primary">Lihat Test Case</a>
+  @endif
+</div>
+
+@if (!$t1Exists && !$t2Exists && !$t3Exists)
+  <ol class="breadcrumb mb-4"><li class="breadcrumb-item active">Belum ada tabel inferensi untuk user ini.</li></ol>
+@elseif ($all->isEmpty())
+  <ol class="breadcrumb mb-4"><li class="breadcrumb-item active">Belum ada data inferensi.</li></ol>
 @else
   <div class="card-body">
     <div class="table-responsive">
       <table class="table table-bordered align-middle">
         <thead class="table-light">
           <tr>
-            <th style="width:80px;">Id</th>
+            <th style="width:90px;">Id</th>
             <th style="min-width:220px;">Case Title</th>
-            <th style="width:100px;">Rule Id</th>
-            <th>Goal</th>
+            <th style="width:110px;">Rule Id</th>
+            <th>Goal / Rule Goal</th>
             <th style="width:140px;">Match Value</th>
             <th style="min-width:180px;">Algorithm</th>
             <th style="width:180px;">Execution Time (s)</th>
@@ -90,55 +116,48 @@
           </tr>
         </thead>
         <tbody>
-          @foreach ($allInference as $index => $row)
+          @foreach ($all as $row)
+            @php
+                // Id tampil: pakai inf_id jika ada, kalau tidak fallback case_id
+                $dispId = $row->inf_id ?? $row->case_id ?? '-';
+
+                // Case title fallback
+                $caseTitle = $kasus->case_title ?? '-';
+
+                // Rule Id
+                $ruleId = $row->rule_id ?? '';
+
+                // Rule goal tampil:
+                $text = (string)($row->rule_goal ?? '');
+                if (strtoupper((string)$ruleId) !== 'SVM') {
+                    // Rapikan tampilan (buang prefix angka_, ganti _/- jadi spasi, rapikan '=')
+                    $text = preg_replace('/\b\d+_/', ' ', $text);
+                    $text = str_replace(['_', '-'], ' ', $text);
+                    $text = str_replace('=', ' =', $text);
+                    $text = preg_replace('/\s+/', ' ', $text);
+                }
+
+                // Match value (DECIMAL(5,4))
+                $mv = isset($row->match_value) ? (float)$row->match_value : 0.0;
+                $mvFmt = number_format($mv, 4);
+
+                // Algoritma
+                $algo = $renderAlgo($row);
+
+                // Waktu eksekusi (DECIMAL(16,14))
+                $sec = isset($row->waktu) ? (float)$row->waktu : 0.0;
+                $secFmt = number_format($sec, 6);
+            @endphp
             <tr>
-              {{-- Id di tabel inferensi adalah inf_id (auto increment) pada strukturmu --}}
-              <td>{{ $row->inf_id ?? $row->case_id }}</td>
-
-              {{-- Case Title (fallback '-' jika kosong) --}}
-              <td>{{ $kasus->case_title ?? '-' }}</td>
-
-              {{-- Rule Id (SVM akan berisi 'SVM') --}}
-              <td>{{ $row->rule_id }}</td>
-
-              {{-- Goal (rule_goal) --}}
+              <td>{{ $dispId }}</td>
+              <td>{{ $caseTitle }}</td>
+              <td>{{ $ruleId }}</td>
+              <td>{{ $text }}</td>
+              <td>{{ $mvFmt }}</td>
+              <td>{{ $algo }}</td>
+              <td>{{ $secFmt }}</td>
               <td>
-                @php
-                  $text = (string)($row->rule_goal ?? '');
-                  // Untuk SVM: biarkan apa adanya (agar "kernel=..." tetap terlihat)
-                  if (strtoupper((string)$row->rule_id) !== 'SVM') {
-                      // Bersihkan angka_id dan underscore/dash untuk tampilan rules lain
-                      $text = preg_replace('/\b\d+_/', ' ', $text);
-                      $text = str_replace(['_', '-'], ' ', $text);
-                      $text = str_replace('=', ' =', $text);
-                  }
-                @endphp
-                {{ $text }}
-              </td>
-
-              {{-- Match Value (format 4 desimal sesuai DECIMAL(5,4)) --}}
-              <td>
-                @php
-                  $mv = isset($row->match_value) ? (float)$row->match_value : 0;
-                @endphp
-                {{ number_format($mv, 4) }}
-              </td>
-
-              {{-- Algorithm: mapping dari test_case_user, fallback SVM --}}
-              <td>{{ $renderAlgo($row) }}</td>
-
-              {{-- Execution Time --}}
-              <td>
-                @php
-                  // kolom 'waktu' di strukturmu DECIMAL(16,14)
-                  $sec = isset($row->waktu) ? (float)$row->waktu : 0;
-                @endphp
-                {{ number_format($sec, 6) }}
-              </td>
-
-              {{-- Detail --}}
-              <td>
-                <a href="{{ url('/detail?case_id=' . urlencode($row->case_id)) }}" class="btn btn-primary btn-sm">Detail</a>
+                <a href="{{ url('/detail?case_id=' . urlencode($row->case_id ?? '')) }}" class="btn btn-primary btn-sm">Detail</a>
               </td>
             </tr>
           @endforeach

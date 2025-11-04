@@ -68,7 +68,7 @@ class ConsultationController extends Controller
         // Payload insert
         $data = [
             'user_id'   => $user_id,
-            'case_num'  => $user_id,                 // kamu memang menyamakan case_num=user_id
+            'case_num'  => $user_id,
             'algoritma' => $request->input('action_type'),
         ];
 
@@ -126,83 +126,80 @@ class ConsultationController extends Controller
                 ->with('success', 'Backward Chaining executed!');
         }
 
-        // === Support Vector Machine (train → infer → insert ke inferensi_user_{userId})
+        // === Support Vector Machine (train → infer → insert ke inferensi_user_{userId} + diagnostics)
         if ($actionType === 'Support Vector Machine') {
             $kernel = $request->input('svm_kernel', 'sgd'); // contoh: sgd | rbf:D=1024:gamma=0.25 | sigmoid:D=...
 
-            // 1) Cari PHP CLI
-            $phpBin = env('PHP_BIN');
-            if (!$phpBin) {
-                $finder = new PhpExecutableFinder();
-                $phpBin = $finder->find(false) ?: 'php';
-            }
-            $lower = strtolower($phpBin);
-            if (Str::endsWith($lower, 'php-cgi.exe')) {
-                $cli = str_replace('php-cgi.exe', 'php.exe', $phpBin);
-                if (is_file($cli)) $phpBin = $cli;
-            }
+            $phpBin = $this->resolvePhpBinary();
 
-            // 2) Resolve path trainer SVM.php
+            // DIAGNOSTICS
+            $diag = [];
+            $diag[] = $this->diagLine('User ID', (string)$user_id);
+            $diag[] = $this->diagLine('Kernel', $kernel);
+            $diag[] = $this->diagLine('PHP BIN', $phpBin, is_file($phpBin) || Str::startsWith($phpBin, 'php'));
+
+            // Locate SVM.php
             try {
                 $svmScript = $this->resolveScriptPath(env('SVM_SCRIPT'), [
                     'scripts/decision-tree/SVM.php',
-                    'app/SVM.php',
-                    'app/Console/SVM.php',
-                    'SVM.php',
+                    'app/SVM.php', 'app/Console/SVM.php', 'SVM.php',
                 ]);
+                $diag[] = $this->diagLine('SVM.php', $svmScript, true);
             } catch (\Throwable $e) {
-                return back()->with('error', "SVM: " . $e->getMessage());
+                $diag[] = $this->diagLine('SVM.php', 'NOT FOUND', false);
+                return back()->with('error', "SVM: {$e->getMessage()}")->with('svm_diag', implode("\n", $diag));
             }
 
-            // 3) TRAIN: php SVM.php <uid> <uid> <kernel> --table=test_case_user_{uid}
-            $trainCmd  = [$phpBin, $svmScript, (string)$user_id, (string)$user_id, $kernel, "--table={$table}"];
-            $trainProc = new Process($trainCmd, base_path(), null, null, 600);
-            $trainProc->run();
-            $stdoutT = $trainProc->getOutput();
-            $stderrT = $trainProc->getErrorOutput();
+            // Count before (inferensi)
+            $before = $this->countInferensi($user_id);
+            $diag[] = $this->diagLine('Inferensi before', (string)$before);
 
-            if (!$trainProc->isSuccessful()) {
-                $cmdStr = implode(' ', array_map(fn($p)=>str_contains($p,' ') ? "\"$p\"" : $p, $trainCmd));
-                return back()->with('error',
-                    "Training SVM gagal.\nCommand : {$cmdStr}\n\nStderr:\n{$stderrT}\n\nOutput:\n{$stdoutT}"
-                );
+            // TRAIN
+            $trainCmd = [$phpBin, $svmScript, (string)$user_id, (string)$user_id, $kernel, "--table={$table}"];
+            $trainRes = $this->runProcess($trainCmd, 600);
+            $diag[]   = $this->diagLine('Train CMD', $trainRes['cmd'], $trainRes['ok']);
+
+            // Cek model JSON hasil training (perkiraan path)
+            $modelPath   = $this->modelPathGuess($user_id, $kernel);
+            $modelExists = is_file($modelPath);
+            $diag[]      = $this->diagLine('Model JSON', $modelExists ? $modelPath : 'NOT FOUND', $modelExists);
+
+            if (!$trainRes['ok']) {
+                $msg = "Training SVM gagal.\n\nCMD:\n{$trainRes['cmd']}\n\nSTDERR:\n{$trainRes['stderr']}\n\nSTDOUT:\n{$trainRes['stdout']}";
+                return back()->with('error', $msg)->with('svm_diag', implode("\n", $diag));
             }
 
-            // BEFORE count buat info
-            $infTbl = "inferensi_user_{$user_id}";
-            $before = Schema::hasTable($infTbl) ? (int) DB::table($infTbl)->count() : 0;
-
-            // 4) Resolve path runner SVMInfer.php
+            // Locate SVMInfer.php
             try {
                 $inferScript = $this->resolveScriptPath(env('SVM_INFER_SCRIPT'), [
                     'scripts/decision-tree/SVMInfer.php',
-                    'app/SVMInfer.php',
-                    'app/Console/SVMInfer.php',
-                    'SVMInfer.php',
+                    'app/SVMInfer.php', 'app/Console/SVMInfer.php', 'SVMInfer.php',
                 ]);
+                $diag[] = $this->diagLine('SVMInfer.php', $inferScript, true);
             } catch (\Throwable $e) {
-                return back()->with('success', "Training SVM OK.\n{$stdoutT}\n\n(Perhatian: runner SVMInfer.php tidak ditemukan, jadi belum insert ke inferensi)");
+                $diag[] = $this->diagLine('SVMInfer.php', 'NOT FOUND', false);
+                $okMsg  = "Training SVM OK.\n{$trainRes['stdout']}\n\n(Perhatian: runner SVMInfer.php tidak ditemukan, jadi belum insert ke inferensi)";
+                return back()->with('success', $okMsg)->with('svm_diag', implode("\n", $diag));
             }
 
-            // 5) INFER: php SVMInfer.php <uid> <uid> --table=test_case_user_{uid}
-            $inferCmd  = [$phpBin, $inferScript, (string)$user_id, (string)$user_id, "--table={$table}"];
-            $inferProc = new Process($inferCmd, base_path(), null, null, 300);
-            $inferProc->run();
-            $stdoutI = $inferProc->getOutput();
-            $stderrI = $inferProc->getErrorOutput();
+            // INFER
+            $inferCmd = [$phpBin, $inferScript, (string)$user_id, (string)$user_id, "--table={$table}"];
+            $inferRes = $this->runProcess($inferCmd, 300);
+            $diag[]   = $this->diagLine('Infer CMD', $inferRes['cmd'], $inferRes['ok']);
 
-            if (!$inferProc->isSuccessful()) {
-                $cmdStr = implode(' ', array_map(fn($p)=>str_contains($p,' ') ? "\"$p\"" : $p, $inferCmd));
-                return back()->with('error',
-                    "SVM Inference gagal.\nCommand : {$cmdStr}\n\nStderr:\n{$stderrI}\n\nOutput:\n{$stdoutI}"
-                );
-            }
-
-            // AFTER count
-            $after = Schema::hasTable($infTbl) ? (int) DB::table($infTbl)->count() : 0;
+            // AFTER
+            $after = $this->countInferensi($user_id);
             $added = $after - $before;
+            $diag[] = $this->diagLine('Inferensi after', (string)$after, $after >= $before);
+            $diag[] = $this->diagLine('Rows added', (string)$added, $added >= 0);
 
-            return back()->with('success', "Training SVM OK.\n{$stdoutT}\n\nInference OK (added {$added}).\n{$stdoutI}");
+            if (!$inferRes['ok']) {
+                $msg = "SVM Inference gagal.\n\nCMD:\n{$inferRes['cmd']}\n\nSTDERR:\n{$inferRes['stderr']}\n\nSTDOUT:\n{$inferRes['stdout']}";
+                return back()->with('error', $msg)->with('svm_diag', implode("\n", $diag));
+            }
+
+            $ok = "Training SVM OK.\n{$trainRes['stdout']}\n\nInference OK (added {$added}).\n{$inferRes['stdout']}";
+            return back()->with('success', $ok)->with('svm_diag', implode("\n", $diag));
         }
 
         return back()->with('error', 'Action tidak dikenali.');
@@ -284,7 +281,7 @@ class ConsultationController extends Controller
         return redirect()->route('test.case.form')->with('success', 'Case deleted successfully.');
     }
 
-    /* ============================ Helpers ============================ */
+    /* ============================ HELPERS: PATHS ============================ */
 
     /**
      * Resolve path skrip CLI dari ENV (opsional) + fallback kandidat relatif.
@@ -325,5 +322,55 @@ class ConsultationController extends Controller
         return Str::startsWith($p, ['/'])                 // unix absolute
             || (bool) preg_match('#^[A-Za-z]:/#', $p)     // windows drive
             || Str::startsWith($p, ['//', '\\\\']);       // UNC
+    }
+
+    /* ============================ HELPERS: DEBUG ============================ */
+
+    private function runProcess(array $cmd, int $timeoutSec = 600): array
+    {
+        $pretty = implode(' ', array_map(fn($p) => str_contains($p, ' ') ? "\"$p\"" : $p, $cmd));
+        $proc = new Process($cmd, base_path(), null, null, $timeoutSec);
+        $proc->run();
+        return [
+            'cmd'     => $pretty,
+            'ok'      => $proc->isSuccessful(),
+            'code'    => $proc->getExitCode(),
+            'stdout'  => trim($proc->getOutput() ?? ''),
+            'stderr'  => trim($proc->getErrorOutput() ?? ''),
+        ];
+    }
+
+    private function countInferensi(int $userId): int
+    {
+        $t = "inferensi_user_{$userId}";
+        return Schema::hasTable($t) ? (int) DB::table($t)->count() : 0;
+    }
+
+    private function modelPathGuess(int $userId, string $kernel): string
+    {
+        $storageDir = function_exists('storage_path') ? storage_path('app/svm') : base_path('svm_models');
+        $short = strtolower(explode(':', $kernel)[0]);
+        return rtrim($storageDir, '/\\')."/svm_user_{$userId}_{$short}.json";
+    }
+
+    private function resolvePhpBinary(): string
+    {
+        $phpBin = env('PHP_BIN');
+        if (!$phpBin) {
+            $finder = new PhpExecutableFinder();
+            $phpBin = $finder->find(false) ?: 'php';
+        }
+        $lower = strtolower($phpBin);
+        if (Str::endsWith($lower, 'php-cgi.exe')) {
+            $cli = str_replace('php-cgi.exe', 'php.exe', $phpBin);
+            if (is_file($cli)) $phpBin = $cli;
+        }
+        return $phpBin;
+    }
+
+    private function diagLine(string $key, string $value, bool $ok = true): string
+    {
+        $mark = $ok ? '✅' : '❌';
+        return "{$mark} {$key}: {$value}";
     }
 }

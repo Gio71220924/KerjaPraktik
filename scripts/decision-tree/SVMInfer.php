@@ -8,6 +8,7 @@ function envv(string $k, $d=null){
   if(isset($_SERVER[$k]) && $_SERVER[$k]!=='') return $_SERVER[$k];
   return $d;
 }
+
 $host=(string)envv('DB_HOST','127.0.0.1');
 $port=(int)envv('DB_PORT',3307);
 $database=(string)envv('DB_DATABASE','expertt');
@@ -20,9 +21,15 @@ function table_exists(mysqli $db,string $schema,string $table):bool{
   $q=$db->query("SELECT 1 FROM information_schema.tables WHERE table_schema='{$schema}' AND table_name='{$table}' LIMIT 1");
   return $q && $q->num_rows>0;
 }
-if (PHP_SAPI!=='cli' || $argc<3){ fwrite(STDERR,"Usage: php SVMInfer.php <user_id> <case_num> [--table=table_name]\n"); exit(1); }
-$userId=(int)$argv[1]; $caseNum=(int)$argv[2];
-$overrideTable=null; for($i=3;$i<$argc;$i++){ if (str_starts_with($argv[$i],'--table=')) $overrideTable=substr($argv[$i],8); }
+
+if (PHP_SAPI!=='cli' || $argc<3){
+  fwrite(STDERR,"Usage: php SVMInfer.php <user_id> <case_num> [--table=table_name]\n");
+  exit(1);
+}
+$userId=(int)$argv[1];
+$caseNum=(int)$argv[2];
+$overrideTable=null;
+for($i=3;$i<$argc;$i++){ if (str_starts_with($argv[$i],'--table=')) $overrideTable=substr($argv[$i],8); }
 
 mysqli_report(MYSQLI_REPORT_ERROR|MYSQLI_REPORT_STRICT);
 $db=new mysqli($host,$username,$password,$database,$port);
@@ -72,11 +79,13 @@ if(!table_exists($db,$database,$infTbl)){
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   ");
 } else {
+  // bersihkan baris SVM lama biar tidak dobel
   $db->query("DELETE FROM `{$infTbl}` WHERE rule_id='SVM'");
 }
 
 function applyKernel(array $xBase, string $type, array $meta, array $baseIndex): array {
   if ($type==='sgd') return $xBase;
+
   if ($type==='rbf'){
     $D=(int)($meta['D'] ?? 1024); $gamma=(float)($meta['gamma'] ?? 0.25);
     $seed=(int)($meta['seed'] ?? crc32(json_encode(array_keys($baseIndex)))); mt_srand($seed);
@@ -96,6 +105,7 @@ function applyKernel(array $xBase, string $type, array $meta, array $baseIndex):
     }
     return $z;
   }
+
   if ($type==='sigmoid'){
     $D=(int)($meta['D'] ?? 1024); $scale=(float)($meta['scale'] ?? 1.0); $coef0=(float)($meta['coef0'] ?? 0.0);
     $seed=(int)($meta['seed'] ?? (14641 ^ crc32(json_encode(array_keys($baseIndex))))); mt_srand($seed);
@@ -114,18 +124,28 @@ function applyKernel(array $xBase, string $type, array $meta, array $baseIndex):
     }
     return $z;
   }
+
   return $xBase;
 }
-function sigmoid_conf(float $margin): float { $c=1.0/(1.0+exp(-abs($margin))); return max(0.0,min(1.0,$c)); }
+
+function sigmoid_conf(float $margin): float {
+  $c=1.0/(1.0+exp(-abs($margin)));
+  return max(0.0,min(1.0,$c));
+}
 
 $B=count($baseIndex);
 function encodeRow(array $row, array $baseIndex, array $numMinmax, int $B): array {
   $x=array_fill(0,$B,0.0);
+  // numeric
   foreach ($numMinmax as $col=>$mm){
     $min=(float)$mm['min']; $max=(float)$mm['max'];
     $fv = isset($row[$col]) && is_numeric($row[$col]) ? (float)$row[$col] : 0.0;
-    $x[$baseIndex["NUM::{$col}"] ?? -1] = ($baseIndex["NUM::{$col}"] ?? -1)===-1 ? 0.0 : (($max>$min)? ($fv-$min)/($max-$min) : 0.0);
+    $idx = $baseIndex["NUM::{$col}"] ?? null;
+    if ($idx!==null){
+      $x[$idx] = ($max>$min)? ($fv-$min)/($max-$min) : 0.0;
+    }
   }
+  // categorical one-hot
   foreach ($baseIndex as $key=>$idx){
     if (!str_starts_with($key,'CAT::')) continue;
     [, $col, $val] = explode('::',$key,3);
@@ -146,6 +166,7 @@ while($r=$cases->fetch_assoc()){
   $xBase=encodeRow($r,$baseIndex,$numMinmax,$B);
   $z=applyKernel($xBase,$kernelType,$kernelMeta,$baseIndex);
   $z[] = 1.0;
+
   $dot=0.0; for($i=0;$i<count($z);$i++) $dot+=($W[$i]??0.0)*$z[$i];
   $sign=($dot>=0)?'+1':'-1'; $pred=$labelMap[$sign] ?? $sign;
 
@@ -154,9 +175,9 @@ while($r=$cases->fetch_assoc()){
   $caseGoal= $goalKey ? "{$goalKey} = {$actual}" : '';
   $cocok   = ($actual!=='' && $pred===$actual) ? '1':'0';
 
-  $conf = number_format(sigmoid_conf($dot), 4, '.', '');
-  $elapsed = number_format(microtime(true)-$start, 14, '.', '');
-  $ruleId='SVM';
+  $conf   = number_format(sigmoid_conf($dot), 4, '.', '');
+  $elapsed= number_format(microtime(true)-$start, 14, '.', '');
+  $ruleId ='SVM';
   $ruleGoal= ($goalKey ? "{$goalKey} = " : "") . "{$pred} | kernel={$kernelType}";
 
   $ins->bind_param("ssssdsid",$caseId,$caseGoal,$ruleId,$ruleGoal,$conf,$cocok,$userId,$elapsed);
