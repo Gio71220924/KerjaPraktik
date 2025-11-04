@@ -421,6 +421,8 @@ echo json_encode([
     'eta0'=>$eta0
   ],
   'model_path'=>$modelPath,
+  'source_table'   => $sourceTable,   // <= tambahkan ini
+  'goal_column'    => $goalKey        // <= dan ini
 ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) . PHP_EOL;
 
 $db->close();

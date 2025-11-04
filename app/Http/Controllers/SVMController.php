@@ -130,7 +130,7 @@ class SVMController extends Controller
 
         $goalCol   = $goalAttr->atribut_id . '_' . $goalAttr->atribut_name;
         $kernel    = (string)$request->input('kernel', 'sgd');
-        $table     = $request->input('table'); // contoh: rule_user_{id}
+        $table  = "case_user_{$userId}";  //kunci ke case_user agar konsisten
 
         // Pastikan log table ada
         $this->ensureSvmLogTable($userId);
@@ -146,7 +146,7 @@ class SVMController extends Controller
         ]);
 
         // Train
-        $train = $this->runTraining($userId, $caseId, $kernel, redirectBack:false, tableOverride:$table);
+        $train = $this->runTraining($userId, $caseId, $kernel, redirectBack: false, tableOverride: $table);
         if ($train['error'] ?? false) {
             return back()->with('svm_err', "Training gagal:\n" . ($train['message'] ?? ''));
         }
