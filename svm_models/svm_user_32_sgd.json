@@ -1,0 +1,31 @@
+{
+    "type": "svm_sgd",
+    "dim": 5,
+    "weights": [
+        1.0991207034372505,
+        -1.0991207034372505,
+        5.5477871164572415e-17,
+        -1.386974512503215e-17,
+        2.77394902500643e-17
+    ],
+    "bias_index": 4,
+    "lambda": 0.0001,
+    "epochs": 20,
+    "eta0": 0.1,
+    "goal_column": "202_Olahraga",
+    "label_map": {
+        "+1": "336_Iya",
+        "-1": "337_Tidak"
+    },
+    "feature_index": {
+        "CAT::200_Kondisi_Tubuh::332_Fit": 0,
+        "CAT::200_Kondisi_Tubuh::333_Tidak Fit": 1,
+        "CAT::201_Cuaca::334_Cerah": 2,
+        "CAT::201_Cuaca::335_Hujan": 3
+    },
+    "numeric_minmax": [],
+    "kernel": "sgd",
+    "kernel_meta": {
+        "type": "sgd"
+    }
+}
