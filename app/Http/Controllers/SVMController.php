@@ -25,7 +25,7 @@ class SVMController extends Controller
             ->orderBy('atribut_id')
             ->get();
 
-        // Ambil goal (boleh null)
+        // Ambil goal (opsional)
         $goalAttr = DB::table('atribut')
             ->where('user_id', $userId)
             ->where(function($q){ $q->where('goal',1)->orWhere('goal','T'); })
@@ -51,7 +51,7 @@ class SVMController extends Controller
                 ->get();
         }
 
-        // Riwayat SVM (opsional)
+        // Riwayat SVM (tampilkan hanya success/failed; sembunyikan 'case')
         $svmData = [];
         $table = "svm_user_{$userId}";
         try {
@@ -62,7 +62,11 @@ class SVMController extends Controller
                 LIMIT 1
             ", [$table]);
             if ($exists && (int)$exists->c > 0) {
-                $svmData = DB::table($table)->orderBy('id')->limit(50)->get();
+                $svmData = DB::table($table)
+                    ->where('status', '!=', 'case')
+                    ->orderByDesc('id')
+                    ->limit(100)
+                    ->get();
             }
         } catch (\Throwable $e) { /* ignore */ }
 
@@ -70,32 +74,35 @@ class SVMController extends Controller
             ->with(['message' => null]);
     }
 
-    /** Train manual */
+    /**
+     * Train manual via tombol "Train" (otomatis ambil sumber dari case_user_{userId})
+     * Tidak butuh user_id & case_num dari form.
+     */
     public function generateSVM(Request $request)
     {
-        $data = $request->validate([
-            'user_id'  => 'required|integer',
-            'case_num' => 'required|integer',
-            'kernel'   => 'nullable|string',
-            'table'    => 'nullable|string',
-        ]);
+        $userId = Auth::user()->user_id;
 
-        $userId = (int)$data['user_id'];
-        $case   = (int)$data['case_num'];      // ← perbaikan: was $caseId
-        $kernel = $data['kernel'] ?: 'sgd';
-        $table  = $data['table'] ?? null;
+        $kernel = (string)$request->input('kernel', 'sgd');
+        $table  = "case_user_{$userId}";
 
-        return $this->runTraining($userId, $case, $kernel, redirectBack:true, tableOverride:$table);
+        // Jalankan training tanpa redireksi balik otomatis
+        $train = $this->runTraining($userId, $userId, $kernel, redirectBack: false, tableOverride: $table);
+
+        if ($train['error'] ?? false) {
+            return back()->with('svm_err', "Training gagal:\n" . ($train['message'] ?? ''));
+        }
+
+        return back()->with('svm_ok', trim($train['stdout'] ?? 'Training selesai.'));
     }
 
     /**
-     * Input kasus via form → log ke svm_user_{id} → train → prediksi → INSERT ke inferensi_user_{id}
+     * Input atribut via form → train (tanpa membuat log 'case') → predict → INSERT ke inferensi_user_{id}
      * Form: kernel + attr[atribut_id] = valueId_valueName
      * Goal tidak diisi user; dipakai goal dari model.
      */
     public function storeCaseAndTrain(Request $request)
     {
-        $userId = Auth::id();
+        $userId = Auth::user()->user_id;
 
         $request->validate([
             'kernel' => 'required|string',
@@ -103,7 +110,7 @@ class SVMController extends Controller
             'table'  => 'nullable|string',
         ]);
 
-        // Ambil seluruh atribut
+        // Ambil seluruh atribut untuk user
         $atributs = DB::table('atribut')
             ->where('user_id', $userId)
             ->orderBy('atribut_id')
@@ -131,28 +138,17 @@ class SVMController extends Controller
 
         $goalCol   = $goalAttr->atribut_id . '_' . $goalAttr->atribut_name;
         $kernel    = (string)$request->input('kernel', 'sgd');
-        $table  = "case_user_{$userId}";  //kunci ke case_user agar konsisten
+        $tableSrc  = "case_user_{$userId}";  // Sumber training konsisten dari case_user
 
-        // Pastikan log table ada
-        $this->ensureSvmLogTable($userId);
+        // ❌ Tidak ada lagi INSERT log 'case' ke svm_user_{userId}
 
-        // Simpan log 'case'
-        $caseId = DB::table("svm_user_{$userId}")->insertGetId([
-            'status'      => 'case',
-            'output'      => 'Input case (UI SVM)',
-            'goal_value'  => null,
-            'input_json'  => json_encode($inputAttr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            'created_at'  => now(),
-            'updated_at'  => now(),
-        ]);
-
-        // Train
-        $train = $this->runTraining($userId, $caseId, $kernel, redirectBack: false, tableOverride: $table);
+        // TRAIN
+        $train = $this->runTraining($userId, $userId, $kernel, redirectBack: false, tableOverride: $tableSrc);
         if ($train['error'] ?? false) {
             return back()->with('svm_err', "Training gagal:\n" . ($train['message'] ?? ''));
         }
 
-        // Prediksi
+        // PREDIKSI dari input form
         $pred = $this->predictFromForm($userId, $kernel, $inputAttr, $goalCol);
         // $pred: ['label','margin','goal_key','kernel','summary']
 
@@ -160,10 +156,10 @@ class SVMController extends Controller
         $execSec   = $train['json']['execution_time']['total_sec']   ?? null;
         $kernelOut = $train['json']['kernel']                        ?? $pred['kernel'];
 
-        // === INSERT KE TABEL INFERENSI (SCHEMA LEGACY) ===
+        // INSERT hasil ke tabel inferensi (schema lama bila ada, fallback generik bila tidak)
         $this->insertInferenceAutoSchema(
             userId:     $userId,
-            caseId:     (string)$caseId,
+            caseId:     (string) Str::ulid(),  // ID kasus untuk inferensi (bukan dari svm_user)
             goalKey:    $pred['goal_key'],
             goalLabel:  $pred['label'],
             margin:     $pred['margin'],
@@ -171,8 +167,7 @@ class SVMController extends Controller
             kernel:     $kernelOut
         );
 
-        $ok = "Input case tersimpan (svm_user_{$userId}#{$caseId}).\n\n"
-            . "Training OK:\n" . ($train['stdout'] ?? '(no stdout)') . "\n\n"
+        $ok = "Training OK:\n" . ($train['stdout'] ?? '(no stdout)') . "\n\n"
             . "Prediksi:\n" . $pred['summary'];
 
         return back()->with('svm_ok', $ok);
@@ -191,7 +186,7 @@ class SVMController extends Controller
     ): void {
         $table = "inferensi_user_{$userId}";
 
-        // Kalau tabel belum ada, buat sesuai schema lama (punya kamu)
+        // Jika tabel belum ada, buat sesuai schema lama
         if (!Schema::hasTable($table)) {
             DB::statement("
                 CREATE TABLE `{$table}` (
@@ -217,7 +212,7 @@ class SVMController extends Controller
         }
 
         if ($hasAll) {
-            // pakai schema lama (sesuai tabel kamu)
+            // Pakai schema lama
             $this->insertInferenceLegacy(
                 userId:    $userId,
                 table:     $table,
@@ -231,7 +226,7 @@ class SVMController extends Controller
             return;
         }
 
-        // Fallback: kalau bukan schema lama, insert minimal (versi generik)
+        // Fallback: generik
         $this->insertInferenceGeneric(
             userId:    $userId,
             table:     $table,
@@ -254,13 +249,12 @@ class SVMController extends Controller
         float $margin,
         ?float $execTime
     ): void {
-        // Konversi margin SVM → confidence 0..1 (pakai sigmoid(|margin|))
+        // Konversi margin SVM → confidence [0..1] (sigmoid(|margin|))
         $conf = 1.0 / (1.0 + exp(-abs($margin)));
         if ($conf < 0) $conf = 0;
         if ($conf > 1) $conf = 1;
 
-        // Format sesuai tipe kolom
-        $matchValue = number_format($conf, 4, '.', '');                 // DECIMAL(5,4)
+        $matchValue = number_format($conf, 4, '.', '');                  // DECIMAL(5,4)
         $waktu      = number_format((float)($execTime ?? 0.0), 14, '.', ''); // DECIMAL(16,14)
 
         DB::table($table)->insert([
@@ -285,7 +279,6 @@ class SVMController extends Controller
         ?float $execTime,
         ?string $kernel
     ): void {
-        // Buat tabel generik kalau belum ada (versi sebelumnya)
         DB::statement("
             CREATE TABLE IF NOT EXISTS `{$table}` (
               id INT AUTO_INCREMENT PRIMARY KEY,
@@ -301,7 +294,7 @@ class SVMController extends Controller
         ");
 
         DB::table($table)->insert([
-            'case_id'     => (int)$caseId,
+            'case_id'     => $caseId,
             'rule_id'     => $ruleId,
             'rule_goal'   => $ruleGoal,
             'match_value' => $match,
@@ -313,26 +306,6 @@ class SVMController extends Controller
     }
 
     /** ====== SVM run & prediksi ====== */
-
-    private function ensureSvmLogTable(int $userId): void
-    {
-        $logTable = "svm_user_{$userId}";
-        DB::statement("
-            CREATE TABLE IF NOT EXISTS `{$logTable}` (
-              id INT AUTO_INCREMENT PRIMARY KEY,
-              status VARCHAR(50),
-              execution_time DECIMAL(12,6) NULL,
-              model_path VARCHAR(1024) NULL,
-              output LONGTEXT NULL,
-              goal_value VARCHAR(255) NULL,
-              input_json LONGTEXT NULL,
-              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP NULL DEFAULT NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-        ");
-        try { DB::statement("ALTER TABLE `{$logTable}` ADD COLUMN goal_value VARCHAR(255) NULL"); } catch (\Throwable $e) {}
-        try { DB::statement("ALTER TABLE `{$logTable}` ADD COLUMN input_json LONGTEXT NULL"); } catch (\Throwable $e) {}
-    }
 
     private function runTraining(
         int $userId,
@@ -348,7 +321,7 @@ class SVMController extends Controller
             $phpBin = $finder->find(false) ?: 'php';
         }
         $lower = strtolower($phpBin);
-        if (Str::endsWith($lower, 'php-cgi.exe')) {
+        if (str_ends_with($lower, 'php-cgi.exe')) {
             $cli = str_replace('php-cgi.exe', 'php.exe', $phpBin);
             if (is_file($cli)) $phpBin = $cli;
         }
@@ -400,9 +373,9 @@ class SVMController extends Controller
     private function isAbsolutePath(string $p): bool
     {
         $p = str_replace('\\', '/', $p);
-        return Str::startsWith($p, ['/'])
+        return str_starts_with($p, '/')
             || (bool) preg_match('#^[A-Za-z]:/#', $p)
-            || Str::startsWith($p, ['//', '\\\\']);
+            || str_starts_with($p, '//') || str_starts_with($p, '\\\\');
     }
 
     private function resolveScriptPath(?string $envPath): string
@@ -498,7 +471,7 @@ class SVMController extends Controller
             if ($idx !== null) $xBase[$idx] = $z;
         }
 
-        // kategorikal
+        // kategorikal (one-hot)
         foreach ($baseIndex as $key => $idx) {
             if (str_starts_with($key, 'CAT::')) {
                 $parts = explode('::', $key, 3);
