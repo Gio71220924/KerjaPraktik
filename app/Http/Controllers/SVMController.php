@@ -51,7 +51,7 @@ class SVMController extends Controller
                 ->get();
         }
 
-        // Riwayat SVM (tampilkan hanya success/failed; sembunyikan 'case')
+        // Riwayat SVM (hanya success/failed; sembunyikan 'case')
         $svmData = [];
         $table = "svm_user_{$userId}";
         try {
@@ -74,10 +74,7 @@ class SVMController extends Controller
             ->with(['message' => null]);
     }
 
-    /**
-     * Train manual via tombol "Train" (otomatis ambil sumber dari case_user_{userId})
-     * Tidak butuh user_id & case_num dari form.
-     */
+    /** Train manual (sumber case_user_{userId}) */
     public function generateSVM(Request $request)
     {
         $userId = Auth::user()->user_id;
@@ -85,7 +82,6 @@ class SVMController extends Controller
         $kernel = (string)$request->input('kernel', 'sgd');
         $table  = "case_user_{$userId}";
 
-        // Jalankan training tanpa redireksi balik otomatis
         $train = $this->runTraining($userId, $userId, $kernel, redirectBack: false, tableOverride: $table);
 
         if ($train['error'] ?? false) {
@@ -96,9 +92,9 @@ class SVMController extends Controller
     }
 
     /**
-     * Input atribut via form → train (tanpa membuat log 'case') → predict → INSERT ke inferensi_user_{id}
-     * Form: kernel + attr[atribut_id] = valueId_valueName
-     * Goal tidak diisi user; dipakai goal dari model.
+     * Input atribut via form → train (tanpa log 'case') → predict
+     * → INSERT riwayat ke test_case_user_{userId}
+     * → INSERT hasil ke inferensi_user_{userId} (pakai case_id dari test_case_user)
      */
     public function storeCaseAndTrain(Request $request)
     {
@@ -110,7 +106,7 @@ class SVMController extends Controller
             'table'  => 'nullable|string',
         ]);
 
-        // Ambil seluruh atribut untuk user
+        // Ambil seluruh atribut
         $atributs = DB::table('atribut')
             ->where('user_id', $userId)
             ->orderBy('atribut_id')
@@ -138,9 +134,7 @@ class SVMController extends Controller
 
         $goalCol   = $goalAttr->atribut_id . '_' . $goalAttr->atribut_name;
         $kernel    = (string)$request->input('kernel', 'sgd');
-        $tableSrc  = "case_user_{$userId}";  // Sumber training konsisten dari case_user
-
-        // ❌ Tidak ada lagi INSERT log 'case' ke svm_user_{userId}
+        $tableSrc  = "case_user_{$userId}"; // train dari case_user
 
         // TRAIN
         $train = $this->runTraining($userId, $userId, $kernel, redirectBack: false, tableOverride: $tableSrc);
@@ -152,14 +146,26 @@ class SVMController extends Controller
         $pred = $this->predictFromForm($userId, $kernel, $inputAttr, $goalCol);
         // $pred: ['label','margin','goal_key','kernel','summary']
 
-        // Meta eksekusi
+        // META eksekusi
         $execSec   = $train['json']['execution_time']['total_sec']   ?? null;
         $kernelOut = $train['json']['kernel']                        ?? $pred['kernel'];
 
-        // INSERT hasil ke tabel inferensi (schema lama bila ada, fallback generik bila tidak)
+        // === 1) SIMPAN RIWAYAT KE test_case_user_{userId} ===
+        //     - pastikan tabel & kolom ada
+        //     - insert satu baris, algoritma='Support Vector Machine'
+        $caseId = $this->appendTestCaseRow(
+            userId:   $userId,
+            atribs:   $atributs,
+            goalAttr: $goalAttr,
+            input:    $inputAttr,
+            goalVal:  $pred['label'],
+            algo:     'Support Vector Machine'
+        );
+
+        // === 2) INSERT HASIL KE inferensi_user_{userId} (pakai case_id di atas) ===
         $this->insertInferenceAutoSchema(
             userId:     $userId,
-            caseId:     (string) Str::ulid(),  // ID kasus untuk inferensi (bukan dari svm_user)
+            caseId:     (string)$caseId,              // <- sinkron dengan test_case_user
             goalKey:    $pred['goal_key'],
             goalLabel:  $pred['label'],
             margin:     $pred['margin'],
@@ -173,7 +179,90 @@ class SVMController extends Controller
         return back()->with('svm_ok', $ok);
     }
 
-    /** ====== Helpers untuk INSERT inferensi sesuai schema lama ====== */
+    /* ===========================================================
+     * Test Case History Helpers
+     * ===========================================================
+     */
+
+    /** Pastikan tabel test_case_user_{userId} ada; jika belum, buat. */
+    private function ensureTestCaseTable(int $userId, $atributs, $goalAttr): void
+    {
+        $table = "test_case_user_{$userId}";
+
+        if (!Schema::hasTable($table)) {
+            // Buat tabel dasar
+            DB::statement("
+                CREATE TABLE `{$table}` (
+                  `case_id` INT NOT NULL AUTO_INCREMENT,
+                  `user_id` INT NOT NULL,
+                  `case_num` INT NOT NULL,
+                  `algoritma` VARCHAR(255) NULL,
+                  PRIMARY KEY (`case_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            ");
+        }
+
+        // Pastikan kolom atribut & goal ada (VARCHAR fleksibel)
+        foreach ($atributs as $a) {
+            $col = $a->atribut_id . '_' . $a->atribut_name;
+            if (!Schema::hasColumn($table, $col)) {
+                DB::statement("ALTER TABLE `{$table}` ADD COLUMN `{$col}` VARCHAR(255) NULL");
+            }
+        }
+        // (opsional) jaga-jaga kolom meta
+        foreach (['user_id','case_num','algoritma'] as $c) {
+            if (!Schema::hasColumn($table, $c)) {
+                $type = $c === 'algoritma' ? 'VARCHAR(255) NULL' : 'INT NOT NULL';
+                DB::statement("ALTER TABLE `{$table}` ADD COLUMN `{$c}` {$type}");
+            }
+        }
+    }
+
+    /**
+     * Insert satu baris ke test_case_user_{userId}
+     * @return int case_id inserted
+     */
+    private function appendTestCaseRow(
+        int $userId,
+        $atribs,
+        $goalAttr,
+        array $input,
+        string $goalVal,
+        string $algo = 'Support Vector Machine'
+    ): int {
+        $table = "test_case_user_{$userId}";
+
+        $this->ensureTestCaseTable($userId, $atribs, $goalAttr);
+
+        // Payload: semua atribut non-goal dari input + kolom goal dengan hasil prediksi
+        $payload = [
+            'user_id'  => $userId,
+            'case_num' => $userId,
+            'algoritma'=> $algo,
+        ];
+
+        foreach ($atribs as $a) {
+            $col = $a->atribut_id . '_' . $a->atribut_name;
+            $isGoal = (string)($a->goal ?? '') === 'T' || (int)($a->goal ?? 0) === 1;
+            if ($isGoal) {
+                $payload[$col] = $goalVal;           // tulis label prediksi
+            } else {
+                // isi nilai input kalau ada, selain itu biarkan NULL
+                $payload[$col] = $input[$col] ?? null;
+            }
+        }
+
+        // Insert dan ambil case_id (AUTO_INCREMENT)
+        // MySQL akan mengembalikan last insert id meski nama pk bukan 'id'
+        $id = DB::table($table)->insertGetId($payload);
+
+        return (int)$id;
+    }
+
+    /* ===========================================================
+     * Inferensi (schema lama / fallback generik)
+     * ===========================================================
+     */
 
     private function insertInferenceAutoSchema(
         int $userId,
@@ -186,7 +275,6 @@ class SVMController extends Controller
     ): void {
         $table = "inferensi_user_{$userId}";
 
-        // Jika tabel belum ada, buat sesuai schema lama
         if (!Schema::hasTable($table)) {
             DB::statement("
                 CREATE TABLE `{$table}` (
@@ -204,15 +292,12 @@ class SVMController extends Controller
             ");
         }
 
-        // Pastikan kolom-kolom wajib schema lama tersedia
-        $needCols = ['inf_id','case_id','case_goal','rule_id','rule_goal','match_value','cocok','user_id','waktu'];
-        $hasAll = true;
-        foreach ($needCols as $c) {
-            if (!Schema::hasColumn($table, $c)) { $hasAll = false; break; }
-        }
+        // cek kolom wajib
+        $need = ['inf_id','case_id','case_goal','rule_id','rule_goal','match_value','cocok','user_id','waktu'];
+        $legacy = true;
+        foreach ($need as $c) if (!Schema::hasColumn($table, $c)) { $legacy = false; break; }
 
-        if ($hasAll) {
-            // Pakai schema lama
+        if ($legacy) {
             $this->insertInferenceLegacy(
                 userId:    $userId,
                 table:     $table,
@@ -226,7 +311,6 @@ class SVMController extends Controller
             return;
         }
 
-        // Fallback: generik
         $this->insertInferenceGeneric(
             userId:    $userId,
             table:     $table,
@@ -249,19 +333,18 @@ class SVMController extends Controller
         float $margin,
         ?float $execTime
     ): void {
-        // Konversi margin SVM → confidence [0..1] (sigmoid(|margin|))
         $conf = 1.0 / (1.0 + exp(-abs($margin)));
         if ($conf < 0) $conf = 0;
         if ($conf > 1) $conf = 1;
 
-        $matchValue = number_format($conf, 4, '.', '');                  // DECIMAL(5,4)
-        $waktu      = number_format((float)($execTime ?? 0.0), 14, '.', ''); // DECIMAL(16,14)
+        $matchValue = number_format($conf, 4, '.', '');
+        $waktu      = number_format((float)($execTime ?? 0.0), 14, '.', '');
 
         DB::table($table)->insert([
             'case_id'     => $caseId,
             'case_goal'   => $caseGoal,
-            'rule_id'     => $ruleId,              // 'SVM'
-            'rule_goal'   => $ruleGoal,            // tampilkan kernel juga
+            'rule_id'     => $ruleId,                            // 'SVM'
+            'rule_goal'   => $ruleGoal,                          // include kernel
             'match_value' => $matchValue,
             'cocok'       => '1',
             'user_id'     => $userId,
@@ -294,7 +377,7 @@ class SVMController extends Controller
         ");
 
         DB::table($table)->insert([
-            'case_id'     => $caseId,
+            'case_id'     => (int)$caseId,
             'rule_id'     => $ruleId,
             'rule_goal'   => $ruleGoal,
             'match_value' => $match,
@@ -305,7 +388,10 @@ class SVMController extends Controller
         ]);
     }
 
-    /** ====== SVM run & prediksi ====== */
+    /* ===========================================================
+     * SVM: run & predict
+     * ===========================================================
+     */
 
     private function runTraining(
         int $userId,
@@ -314,7 +400,6 @@ class SVMController extends Controller
         bool $redirectBack = true,
         ?string $tableOverride = null
     ) {
-        // cari php cli
         $phpBin = env('PHP_BIN');
         if (!$phpBin) {
             $finder = new PhpExecutableFinder();
@@ -326,7 +411,6 @@ class SVMController extends Controller
             if (is_file($cli)) $phpBin = $cli;
         }
 
-        // lokasi skrip
         try {
             $script = $this->resolveScriptPath(env('SVM_SCRIPT'));
         } catch (\Throwable $e) {
@@ -336,7 +420,6 @@ class SVMController extends Controller
                 : ['error' => true, 'message' => $msg];
         }
 
-        // command
         $cmd = [$phpBin, $script, (string)$userId, (string)$caseNum, $kernel];
         if ($tableOverride) $cmd[] = "--table={$tableOverride}";
 
@@ -355,7 +438,6 @@ class SVMController extends Controller
                     : ['error' => true, 'message' => $msg, 'stdout' => $stdout, 'stderr' => $stderr, 'cmd' => $cmdStr];
             }
 
-            // JSON terakhir dari stdout
             $json = $this->extractLastJson($stdout);
 
             return $redirectBack
