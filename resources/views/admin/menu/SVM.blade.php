@@ -46,7 +46,8 @@
         <div class="row g-3">
           <div class="col-md-4">
             <label class="form-label">Kernel</label>
-            <select name="kernel" id="kernelSelect" class="form-select" required>
+            {{-- Hanya untuk UI; nilai sebenarnya dikirim lewat hidden #kernelHidden --}}
+            <select id="kernelSelect" class="form-select" required>
               <option value="sgd" selected>SGD (Linear)</option>
               <option value="rbf:D=1024:gamma=0.25">RBF — D=1024, γ=0.25</option>
               <option value="sigmoid:D=1024:scale=1.0:coef0=0.0">Sigmoid — D=1024, scale=1.0, coef0=0.0</option>
@@ -82,6 +83,7 @@
             <input type="number" step="0.1" id="customCoef0" class="form-control" value="0.0">
           </div>
 
+          {{-- Nilai kernel yang dikirim ke server --}}
           <input type="hidden" name="kernel" id="kernelHidden" value="sgd">
         </div>
 
@@ -119,25 +121,31 @@
     </div>
   </div>
 
-  {{-- Riwayat --}}
-  @if(!empty($svmData) && count($svmData) > 0)
+  {{-- Riwayat (terbaru di atas, nomor urut tampilan) --}}
+  @php
+    // Jika controller sudah mengembalikan DESC & tanpa 'case', blok ini tetap aman.
+    // Kalau masih ada 'case', kita filter di sini juga biar bersih.
+    $svmRows = collect($svmData ?? [])->filter(fn($r) => ($r->status ?? '') !== 'case')->values();
+  @endphp
+
+  @if($svmRows->count() > 0)
     <h5>Riwayat Training:</h5>
     <div class="table-responsive">
       <table class="table table-bordered align-middle">
         <thead class="table-light">
           <tr>
-            <th style="width:70px;">ID</th>
+            <th style="width:70px;">No.</th>   {{-- nomor urut tampilan --}}
             <th style="width:120px;">Status</th>
             <th>Output</th>
             <th style="width:200px;">Tanggal</th>
           </tr>
         </thead>
         <tbody>
-          @foreach($svmData as $item)
+          @foreach($svmRows as $item)
             <tr>
-              <td>{{ $item->id }}</td>
+              <td>{{ $loop->iteration }}</td>
               <td>
-                <span class="badge {{ $item->status === 'success' ? 'bg-success' : ($item->status === 'case' ? 'bg-info' : 'bg-danger') }}">
+                <span class="badge {{ $item->status === 'success' ? 'bg-success' : 'bg-danger' }}">
                   {{ $item->status }}
                 </span>
               </td>
