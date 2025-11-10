@@ -62,7 +62,7 @@ class SVMController extends Controller
                 LIMIT 1
             ", [$table]);
             if ($exists && (int)$exists->c > 0) {
-                $svmData = DB::table($table)->orderByDesc('id')->limit(50)->get();
+                $svmData = DB::table($table)->orderBy('id')->limit(50)->get();
             }
         } catch (\Throwable $e) { /* ignore */ }
 
