@@ -8,51 +8,98 @@
 
     $user = Auth::user();
 
+    /**
+     * Set metadata umum per-baris: source, rank algoritma, timestamp dibuat, dan display id unik.
+     */
+    $setCommon = function($r, string $src) {
+        // sumber
+        $r->_source = $src; // 'user' | 'fc' | 'bc'
+
+        // rank algoritma untuk tie-breaker
+        $algoRank = 1;
+        if ($src === 'fc') $algoRank = 2;
+        elseif ($src === 'bc') $algoRank = 3;
+        $r->_algo_rank = $algoRank;
+
+        // normalisasi timestamp "dibuat" (fallback beberapa nama kolom)
+        $r->_created = $r->created_at
+            ?? ($r->createdAt ?? null)
+            ?? ($r->created ?? null)
+            ?? ($r->tanggal ?? null)
+            ?? ($r->ts ?? null);
+
+        $r->_ts = $r->_created ? @strtotime((string)$r->_created) : null;
+
+        // display id unik untuk UI (hindari tabrakan antar tabel)
+        $lid = $r->inf_id ?? $r->id ?? $r->case_id ?? null;
+
+        // deteksi SVM di sumber "user"
+        $isSvm = false;
+        $ruleId   = strtoupper((string)($r->rule_id ?? ''));
+        $ruleGoal = (string)($r->rule_goal ?? $r->goal ?? '');
+        if ($src === 'user' && ($ruleId === 'SVM' || stripos($ruleGoal, 'kernel=') !== false)) {
+            $isSvm = true;
+        }
+
+        if ($src === 'fc')      { $prefix = 'FC-'; }
+        elseif ($src === 'bc')  { $prefix = 'BC-'; }
+        else                    { $prefix = $isSvm ? 'SVM-' : 'MR-'; }
+
+        $r->_disp_id = $lid !== null ? ($prefix . $lid) : ($prefix . '?');
+
+        return $r;
+    };
+
     // === Ambil data dari 3 sumber: inferensi_user, inferensi_fc_user, inferensi_bc_user ===
     $mdlInf = new \App\Models\Inferensi();
     $mdlInf->setTableForUser($user->user_id);
     $t1Exists = $mdlInf->tableExists();
-    $rows1    = $t1Exists ? $mdlInf->getRules()->map(function($r){ $r->_source = 'user'; return $r; }) : collect();
+    $rows1    = $t1Exists
+        ? $mdlInf->getRules()->map(function($r) use ($setCommon){ return $setCommon($r, 'user'); })
+        : collect();
 
     $mdlFC = new \App\Models\ForwardChaining();
     $mdlFC->setTableForUser($user->user_id);
     $t2Exists = $mdlFC->tableExists();
-    $rows2    = $t2Exists ? $mdlFC->getRules()->map(function($r){ $r->_source = 'fc'; return $r; }) : collect();
+    $rows2    = $t2Exists
+        ? $mdlFC->getRules()->map(function($r) use ($setCommon){ return $setCommon($r, 'fc'); })
+        : collect();
 
     $mdlBC = new \App\Models\BackwardChaining();
     $mdlBC->setTableForUser($user->user_id);
     $t3Exists = $mdlBC->tableExists();
-    $rows3    = $t3Exists ? $mdlBC->getRules()->map(function($r){ $r->_source = 'bc'; return $r; }) : collect();
+    $rows3    = $t3Exists
+        ? $mdlBC->getRules()->map(function($r) use ($setCommon){ return $setCommon($r, 'bc'); })
+        : collect();
 
-    // === Gabung & urutkan stabil (numerik/ULID) ===
+    // === Gabung & urutkan: paling dulu dibuat (created_at), lalu tie-breaker algo_rank, lalu id lokal (stabil)
     $all = $rows1->merge($rows2)->merge($rows3)
-        ->sortBy(function($r){
-            $cid = (string)($r->case_id ?? '');
-            $k1  = (ctype_digit($cid) && $cid !== '')
-                ? str_pad($cid, 20, '0', STR_PAD_LEFT)
-                : 'Z' . $cid;
+        ->sortBy(function($r) {
+            // ts: kalau null, dorong ke belakang dengan angka besar (biar yg ada timestamp muncul duluan)
+            $ts = is_int($r->_ts) ? $r->_ts : 9_999_999_999_999;
 
+            // stabilkan id lokal untuk tie-breaker terakhir
             $rid = (string)($r->inf_id ?? $r->id ?? '');
-            $k2  = (ctype_digit($rid) && $rid !== '')
+            $ridKey = (ctype_digit($rid) && $rid !== '')
                 ? str_pad($rid, 20, '0', STR_PAD_LEFT)
                 : 'Z' . $rid;
 
-            return $k1.'-'.$k2;
+            // format string biar sort leksikografis ≈ numerik
+            return sprintf('%013d-%02d-%s', $ts, (int)($r->_algo_rank ?? 9), $ridKey);
         })
         ->values();
 
-    // Case title (opsional)
+    // Case title (opsional global; fallback ke row jika ada per-baris)
     $kasus = \App\Models\Kasus::where('case_num', $user->user_id)->first();
 
-    // === Label algoritma berdasar sumber, bukan test_case_user ===
+    // === Label algoritma untuk tampilan
     $renderAlgo = function($row) {
         $src = $row->_source ?? 'user';
         if ($src === 'fc') return 'Forward Chaining';
         if ($src === 'bc') return 'Backward Chaining';
 
-        // Sumber: inferensi_user
         $ruleId   = strtoupper((string)($row->rule_id ?? ''));
-        $ruleGoal = (string)($row->rule_goal ?? '');
+        $ruleGoal = (string)($row->rule_goal ?? $row->goal ?? '');
         if ($ruleId === 'SVM' || stripos($ruleGoal, 'kernel=') !== false) {
             return 'Support Vector Machine';
         }
@@ -70,12 +117,10 @@
         return preg_replace('/^\s*\d+_/', '', trim($s));
     };
 
-    // Formatter rule_goal:
-    // - SVM: ambil sebelum "| kernel=...", pecah "LHS = RHS", buang prefix angka di kiri/kanan.
-    // - Non-SVM: rapikan massal (hapus "123_", ganti _/- jadi spasi, rapikan '=').
+    // Formatter rule_goal / goal
     $formatRuleGoal = function($row) use ($stripNumPrefix) {
         $ruleId = strtoupper((string)($row->rule_id ?? ''));
-        $raw    = (string)($row->rule_goal ?? '');
+        $raw    = (string)($row->rule_goal ?? $row->goal ?? '');
 
         $isSvm = ($ruleId === 'SVM') || (stripos($raw, 'kernel=') !== false);
         if ($isSvm) {
@@ -89,7 +134,6 @@
             return $stripNumPrefix($main);
         }
 
-        // Non-SVM
         $text = preg_replace('/\b\d+_/', ' ', $raw);
         $text = str_replace(['_', '-'], ' ', $text);
         $text = str_replace('=', ' =', $text);
@@ -142,9 +186,9 @@
       <table class="table table-bordered align-middle">
         <thead class="table-light">
           <tr>
-            <th style="width:90px;">Id</th>
+            <th style="width:120px;">Id</th>
             <th style="min-width:220px;">Case Title</th>
-            <th style="width:110px;">Rule Id</th>
+            <th style="width:120px;">Rule Id</th>
             <th>Goal / Rule Goal</th>
             <th style="width:140px;">Match Value</th>
             <th style="min-width:180px;">Algorithm</th>
@@ -155,13 +199,11 @@
         <tbody>
           @foreach ($all as $row)
             @php
-                // Id tampil: prioritas inf_id, lalu id (tabel generic), terakhir case_id
-                $dispId = $row->inf_id
-                    ?? ($row->id ?? null)
-                    ?? ($row->case_id ?? '-');
+                // Id tampil unik dengan prefix MR-/SVM-/FC-/BC-
+                $dispId = $row->_disp_id ?? '-';
 
-                // Case title
-                $caseTitle = $kasus->case_title ?? '-';
+                // Case title (fallback ke global jika tak ada per-baris)
+                $caseTitle = $row->case_title ?? ($kasus->case_title ?? '-');
 
                 // Rule Id (apa adanya)
                 $ruleId = (string)($row->rule_id ?? '');
@@ -169,15 +211,15 @@
                 // Goal/Rule Goal (dirapikan)
                 $goalText = $formatRuleGoal($row);
 
-                // Match value
-                $mv = isset($row->match_value) ? (float)$row->match_value : 0.0;
+                // Match value (fallback ke 'score' untuk SVM jika ada)
+                $mv = isset($row->match_value) ? (float)$row->match_value : (isset($row->score) ? (float)$row->score : 0.0);
                 $mvFmt = number_format($mv, 4);
 
-                // Algoritma (label) — berdasarkan sumber
+                // Algoritma (label)
                 $algo = $renderAlgo($row);
 
-                // Waktu eksekusi
-                $sec = isset($row->waktu) ? (float)$row->waktu : 0.0;
+                // Waktu eksekusi (fallback beberapa kolom)
+                $sec = isset($row->waktu) ? (float)$row->waktu : (isset($row->exec_time) ? (float)$row->exec_time : 0.0);
                 $secFmt = number_format($sec, 6);
 
                 $cidForLink = $row->case_id ?? '';
@@ -191,7 +233,7 @@
               <td>{{ $algo }}</td>
               <td>{{ $secFmt }}</td>
               <td>
-                <a href="{{ url('/detail?case_id=' . urlencode($cidForLink)) }}" class="btn btn-primary btn-sm">Detail</a>
+                <a href="{{ url('/detail?case_id=' . urlencode((string)$cidForLink)) }}" class="btn btn-primary btn-sm">Detail</a>
               </td>
             </tr>
           @endforeach
