@@ -5,7 +5,6 @@
 
 @php
     use Illuminate\Support\Facades\Auth;
-    use Illuminate\Support\Facades\Schema;
 
     $user = Auth::user();
 
@@ -13,43 +12,51 @@
     $mdlInf = new \App\Models\Inferensi();
     $mdlInf->setTableForUser($user->user_id);
     $t1Exists = $mdlInf->tableExists();
-    $rows1    = $t1Exists ? $mdlInf->getRules() : collect();
+    $rows1    = $t1Exists ? $mdlInf->getRules()->map(function($r){ $r->_source = 'user'; return $r; }) : collect();
 
     $mdlFC = new \App\Models\ForwardChaining();
     $mdlFC->setTableForUser($user->user_id);
     $t2Exists = $mdlFC->tableExists();
-    $rows2    = $t2Exists ? $mdlFC->getRules() : collect();
+    $rows2    = $t2Exists ? $mdlFC->getRules()->map(function($r){ $r->_source = 'fc'; return $r; }) : collect();
 
     $mdlBC = new \App\Models\BackwardChaining();
     $mdlBC->setTableForUser($user->user_id);
     $t3Exists = $mdlBC->tableExists();
-    $rows3    = $t3Exists ? $mdlBC->getRules() : collect();
+    $rows3    = $t3Exists ? $mdlBC->getRules()->map(function($r){ $r->_source = 'bc'; return $r; }) : collect();
 
-    // === Gabung semua hasil ===
+    // === Gabung & urutkan stabil (numerik/ULID) ===
     $all = $rows1->merge($rows2)->merge($rows3)
-                 ->sortBy(fn($r) => sprintf('%020s-%020s', $r->case_id ?? '', $r->inf_id ?? 0))
-                 ->values();
+        ->sortBy(function($r){
+            $cid = (string)($r->case_id ?? '');
+            $k1  = (ctype_digit($cid) && $cid !== '')
+                ? str_pad($cid, 20, '0', STR_PAD_LEFT)
+                : 'Z' . $cid;
+
+            $rid = (string)($r->inf_id ?? $r->id ?? '');
+            $k2  = (ctype_digit($rid) && $rid !== '')
+                ? str_pad($rid, 20, '0', STR_PAD_LEFT)
+                : 'Z' . $rid;
+
+            return $k1.'-'.$k2;
+        })
+        ->values();
 
     // Case title (opsional)
     $kasus = \App\Models\Kasus::where('case_num', $user->user_id)->first();
 
-    // Ambil algoritma dari test_case_user_{userId} untuk mapping label kolom "Algorithm"
-    $generate   = new \App\Models\Consultation();
-    $generate->setTableForUser($user->user_id);
-    $tcExists   = $generate->tableExists();
-    $testCases  = $tcExists ? $generate->getRules() : collect();
-    $algorithms = $testCases->pluck('algoritma', 'case_id')->toArray();
+    // === Label algoritma berdasar sumber, bukan test_case_user ===
+    $renderAlgo = function($row) {
+        $src = $row->_source ?? 'user';
+        if ($src === 'fc') return 'Forward Chaining';
+        if ($src === 'bc') return 'Backward Chaining';
 
-    // Helper render algoritma (fallback SVM jika rule_id = 'SVM')
-    $renderAlgo = function($row) use ($algorithms) {
-        $cid = $row->case_id ?? null;
-        if ($cid !== null && isset($algorithms[$cid]) && $algorithms[$cid] !== '') {
-            return $algorithms[$cid];
-        }
-        if (isset($row->rule_id) && strtoupper((string)$row->rule_id) === 'SVM') {
+        // Sumber: inferensi_user
+        $ruleId   = strtoupper((string)($row->rule_id ?? ''));
+        $ruleGoal = (string)($row->rule_goal ?? '');
+        if ($ruleId === 'SVM' || stripos($ruleGoal, 'kernel=') !== false) {
             return 'Support Vector Machine';
         }
-        return 'Unknown';
+        return 'Matching Rule';
     };
 
     // Ringkasan jumlah per sumber (untuk badge)
@@ -57,6 +64,38 @@
     $cFC    = $rows2->count();
     $cBC    = $rows3->count();
     $cAll   = $all->count();
+
+    // Util: buang prefix angka_ (e.g., "202_Olahraga" -> "Olahraga")
+    $stripNumPrefix = function(string $s){
+        return preg_replace('/^\s*\d+_/', '', trim($s));
+    };
+
+    // Formatter rule_goal:
+    // - SVM: ambil sebelum "| kernel=...", pecah "LHS = RHS", buang prefix angka di kiri/kanan.
+    // - Non-SVM: rapikan massal (hapus "123_", ganti _/- jadi spasi, rapikan '=').
+    $formatRuleGoal = function($row) use ($stripNumPrefix) {
+        $ruleId = strtoupper((string)($row->rule_id ?? ''));
+        $raw    = (string)($row->rule_goal ?? '');
+
+        $isSvm = ($ruleId === 'SVM') || (stripos($raw, 'kernel=') !== false);
+        if ($isSvm) {
+            $main = preg_replace('/\s*\|\s*kernel\s*=.*$/i', '', $raw);
+            if (strpos($main, '=') !== false) {
+                [$lhs, $rhs] = array_map('trim', explode('=', $main, 2));
+                $lhs = $stripNumPrefix($lhs);
+                $rhs = $stripNumPrefix($rhs);
+                return $lhs . ' = ' . $rhs;
+            }
+            return $stripNumPrefix($main);
+        }
+
+        // Non-SVM
+        $text = preg_replace('/\b\d+_/', ' ', $raw);
+        $text = str_replace(['_', '-'], ' ', $text);
+        $text = str_replace('=', ' =', $text);
+        $text = preg_replace('/\s+/', ' ', $text);
+        return trim($text);
+    };
 @endphp
 
 <h1 class="mt-4">Inferensi — {{ $user->username }}</h1>
@@ -90,9 +129,7 @@
 {{-- Tombol kecil utilitas --}}
 <div class="mb-3 d-flex gap-2">
   <a href="{{ url()->current() }}" class="btn btn-sm btn-outline-secondary">Refresh</a>
-  @if ($tcExists)
-    <a href="{{ route('test.case.form') }}" class="btn btn-sm btn-outline-primary">Lihat Test Case</a>
-  @endif
+  <a href="{{ route('test.case.form') }}" class="btn btn-sm btn-outline-primary">Lihat Test Case</a>
 </div>
 
 @if (!$t1Exists && !$t2Exists && !$t3Exists)
@@ -118,46 +155,43 @@
         <tbody>
           @foreach ($all as $row)
             @php
-                // Id tampil: pakai inf_id jika ada, kalau tidak fallback case_id
-                $dispId = $row->inf_id ?? $row->case_id ?? '-';
+                // Id tampil: prioritas inf_id, lalu id (tabel generic), terakhir case_id
+                $dispId = $row->inf_id
+                    ?? ($row->id ?? null)
+                    ?? ($row->case_id ?? '-');
 
-                // Case title fallback
+                // Case title
                 $caseTitle = $kasus->case_title ?? '-';
 
-                // Rule Id
-                $ruleId = $row->rule_id ?? '';
+                // Rule Id (apa adanya)
+                $ruleId = (string)($row->rule_id ?? '');
 
-                // Rule goal tampil:
-                $text = (string)($row->rule_goal ?? '');
-                if (strtoupper((string)$ruleId) !== 'SVM') {
-                    // Rapikan tampilan (buang prefix angka_, ganti _/- jadi spasi, rapikan '=')
-                    $text = preg_replace('/\b\d+_/', ' ', $text);
-                    $text = str_replace(['_', '-'], ' ', $text);
-                    $text = str_replace('=', ' =', $text);
-                    $text = preg_replace('/\s+/', ' ', $text);
-                }
+                // Goal/Rule Goal (dirapikan)
+                $goalText = $formatRuleGoal($row);
 
-                // Match value (DECIMAL(5,4))
+                // Match value
                 $mv = isset($row->match_value) ? (float)$row->match_value : 0.0;
                 $mvFmt = number_format($mv, 4);
 
-                // Algoritma
+                // Algoritma (label) — berdasarkan sumber
                 $algo = $renderAlgo($row);
 
-                // Waktu eksekusi (DECIMAL(16,14))
+                // Waktu eksekusi
                 $sec = isset($row->waktu) ? (float)$row->waktu : 0.0;
                 $secFmt = number_format($sec, 6);
+
+                $cidForLink = $row->case_id ?? '';
             @endphp
             <tr>
               <td>{{ $dispId }}</td>
               <td>{{ $caseTitle }}</td>
               <td>{{ $ruleId }}</td>
-              <td>{{ $text }}</td>
+              <td>{{ $goalText }}</td>
               <td>{{ $mvFmt }}</td>
               <td>{{ $algo }}</td>
               <td>{{ $secFmt }}</td>
               <td>
-                <a href="{{ url('/detail?case_id=' . urlencode($row->case_id ?? '')) }}" class="btn btn-primary btn-sm">Detail</a>
+                <a href="{{ url('/detail?case_id=' . urlencode($cidForLink)) }}" class="btn btn-primary btn-sm">Detail</a>
               </td>
             </tr>
           @endforeach
