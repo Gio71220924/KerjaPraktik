@@ -24,8 +24,11 @@ function envv(string $k, $d=null){
   return $d;
 }
 
-$SAVE_MODEL         = filter_var(envv('SVM_SAVE_MODEL','1'), FILTER_VALIDATE_BOOLEAN);
-$MODEL_DIR_FALLBACK = getcwd() . DIRECTORY_SEPARATOR . 'svm_models';
+$SAVE_MODEL          = filter_var(envv('SVM_SAVE_MODEL','1'), FILTER_VALIDATE_BOOLEAN);
+$MODEL_DIR_FALLBACK  = getcwd() . DIRECTORY_SEPARATOR . 'svm_models';
+// Default proporsi data uji dan threshold keputusan (bisa dioverride via ENV / CLI)
+$DEFAULT_TEST_RATIO  = (float)envv('SVM_TEST_RATIO','0.2');   // 20% untuk uji
+$DECISION_THRESHOLD  = (float)envv('SVM_THRESHOLD','0.0');    // dot >= threshold => kelas +1
 
 ///////////////////////////// HELPERS /////////////////////////////////
 function norm(string $s): string{
@@ -187,6 +190,10 @@ $kv         = parseKvArgs($argv);
 $epochs = isset($kv['epochs']) ? max(1, (int)$kv['epochs']) : 20;
 $lambda = isset($kv['lambda']) ? max(1e-8, (float)$kv['lambda']) : 1e-4;
 $eta0   = isset($kv['eta0'])   ? max(1e-6, (float)$kv['eta0'])   : 0.1;
+// proporsi data uji (0..0.9)
+$testRatio = isset($kv['test_ratio']) ? (float)$kv['test_ratio'] : $DEFAULT_TEST_RATIO;
+if($testRatio < 0.0) $testRatio = 0.0;
+if($testRatio > 0.9) $testRatio = 0.9;
 
 // table override + validasi nama tabel
 $tableOverride = $kv['table'] ?? null;
@@ -265,8 +272,16 @@ if(count($classes)<2){
   $detail=json_encode($freq, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
   log_and_exit_fail($db,$userId,"Butuh >=2 kelas untuk SVM. Distribusi label: {$detail}");
 }
-$posLabel=$classes[0];
-$negLabel=$classes[1];
+// Multi-class: gunakan semua kelas yang ada (>=2)
+$classLabels = array_values($classes);       // daftar label unik (string)
+$numClasses  = count($classLabels);
+// Untuk kompatibilitas lama (binary), tetap definisikan pos/neg dari dua kelas pertama
+$posLabel = $classLabels[0];
+$negLabel = $classLabels[1] ?? $classLabels[0];
+$labelToIndex = [];
+foreach ($classLabels as $idx => $lab) {
+  $labelToIndex[(string)$lab] = $idx;       // map label -> index 0..K-1
+}
 
 ///////////////////////////// INDEX FITUR DASAR ///////////////
 $baseIndex=[]; $bi=0;
@@ -286,8 +301,9 @@ while($row=$res->fetch_assoc()){
   $total++;
   $lab=$row[$goalKey]??null;
   if($lab===null||$lab===''||preg_match('/^(unknown|tidak diketahui)$/i',(string)$lab)){ $skipNoLabel++; continue; }
-  $lab=(string)$lab; if($lab!==$posLabel&&$lab!==$negLabel) continue;
-  $yi=($lab===$posLabel)?+1:-1;
+  $lab=(string)$lab;
+  if(!isset($labelToIndex[$lab])) continue; // jaga-jaga
+  $yi = $labelToIndex[$lab];                // kelas 0..K-1
 
   $xBase=array_fill(0,$B,0.0);
   foreach($row as $c=>$v){
@@ -308,23 +324,57 @@ while($row=$res->fetch_assoc()){
 }
 if(!$X) log_and_exit_fail($db,$userId,"Tidak ada sampel valid. total={$total} kosong_label={$skipNoLabel} fitur_kosong={$skipZero}");
 
+///////////////////////////// SPLIT TRAIN/TEST //////////////////////
+$totalSamples = count($X);
+$indices = range(0,$totalSamples-1);
+// seed khusus split agar reproducible (terpisah dari SGD)
+mt_srand(123);
+shuffle($indices);
+$testCount = (int)round($testRatio * $totalSamples);
+if($testCount < 1) $testCount = 1;
+if($testCount >= $totalSamples) $testCount = $totalSamples-1;
+$testIdx  = array_slice($indices,0,$testCount);
+$trainIdx = array_slice($indices,$testCount);
+
+$Xtrain = []; $ytrain = [];
+$Xtest  = []; $ytest  = [];
+foreach($trainIdx as $idx){
+  $Xtrain[] = $X[$idx];
+  $ytrain[] = $y[$idx];
+}
+foreach($testIdx as $idx){
+  $Xtest[] = $X[$idx];
+  $ytest[] = $y[$idx];
+}
+$nTrain = count($Xtrain);
+$nTest  = count($Xtest);
+
 ///////////////////////////// TRAIN (SGD) //////////////////////
 // seed agar shuffle SGD reproducible
 mt_srand(42);
 
-$W=array_fill(0,$dim,0.0); $n=count($X);
+$W=[];
+for($c=0;$c<$numClasses;$c++){
+  $W[$c]=array_fill(0,$dim,0.0); // satu vektor bobot per kelas
+}
+$n=$nTrain;
 $start=microtime(true); $t=0; $epochTimes=[];
 for($ep=0;$ep<$epochs;$ep++){
   $eStart=microtime(true);
   $order=range(0,$n-1); shuffle($order);
   foreach($order as $i){
     $t++; $eta=$eta0/(1.0+$lambda*$eta0*$t);
-    $dot=0.0; $xi=$X[$i]; $yi=$y[$i]; $L=count($xi);
-    for($k=0;$k<$L;$k++) $dot+=$W[$k]*$xi[$k];
-    if($yi*$dot<1.0){
-      for($k=0;$k<$L;$k++) $W[$k]-=$eta*($lambda*$W[$k]-$yi*$xi[$k]);
-    }else{
-      for($k=0;$k<$L;$k++) $W[$k]-=$eta*($lambda*$W[$k]);
+    $xi=$Xtrain[$i]; $yi=$ytrain[$i]; $L=count($xi);
+    // one-vs-rest: update bobot untuk tiap kelas
+    for($c=0;$c<$numClasses;$c++){
+      $yc = ($c===$yi)?+1.0:-1.0;
+      $dot=0.0;
+      for($k=0;$k<$L;$k++) $dot+=$W[$c][$k]*$xi[$k];
+      if($yc*$dot<1.0){
+        for($k=0;$k<$L;$k++) $W[$c][$k]-=$eta*($lambda*$W[$c][$k]-$yc*$xi[$k]);
+      }else{
+        for($k=0;$k<$L;$k++) $W[$c][$k]-=$eta*($lambda*$W[$c][$k]);
+      }
     }
   }
   $epochTimes[]=microtime(true)-$eStart;
@@ -336,11 +386,38 @@ $throughput=$n*$epochs/max($duration,1e-9);
 ///////////////////////////// TRAIN ACC ///////////////////////
 $correct=0;
 for($i=0;$i<$n;$i++){
-  $dot=0.0; $xi=$X[$i]; $yi=$y[$i]; $L=count($xi);
-  for($k=0;$k<$L;$k++) $dot+=$W[$k]*$xi[$k];
-  $pred=($dot>=0)?+1:-1; if($pred===$yi)$correct++;
+  $xi=$Xtrain[$i]; $yi=$ytrain[$i]; $L=count($xi);
+  $bestIdx=null; $bestScore=null;
+  for($c=0;$c<$numClasses;$c++){
+    $dot=0.0;
+    for($k=0;$k<$L;$k++) $dot+=$W[$c][$k]*$xi[$k];
+    if($bestScore===null || $dot>$bestScore){
+      $bestScore=$dot; $bestIdx=$c;
+    }
+  }
+  if($bestIdx===$yi) $correct++;
 }
-$acc=$correct/$n;
+$trainAcc = $n>0 ? $correct/$n : 0.0;
+$acc = $trainAcc; // backward compatibility
+
+///////////////////////////// TEST ACC /////////////////////////
+$testAcc = null;
+if($nTest>0){
+  $correctTest = 0;
+  for($i=0;$i<$nTest;$i++){
+    $xi=$Xtest[$i]; $yi=$ytest[$i]; $L=count($xi);
+    $bestIdx=null; $bestScore=null;
+    for($c=0;$c<$numClasses;$c++){
+      $dot=0.0;
+      for($k=0;$k<$L;$k++) $dot+=$W[$c][$k]*$xi[$k];
+      if($bestScore===null || $dot>$bestScore){
+        $bestScore=$dot; $bestIdx=$c;
+      }
+    }
+    if($bestIdx===$yi) $correctTest++;
+  }
+  $testAcc = $correctTest/$nTest;
+}
 
 ///////////////////////////// SIMPAN MODEL /////////////////////
 $modelPath=null;
@@ -360,7 +437,14 @@ if($SAVE_MODEL){
     'epochs'=>$epochs,
     'eta0'=>$eta0,
     'goal_column'=>$goalKey,
-    'label_map'=>['+1'=>$posLabel,'-1'=>$negLabel],
+    // Multi-class
+    'classes'=>$classLabels,
+    'num_classes'=>$numClasses,
+    // Backward-compat (binary); diabaikan jika 'classes' tersedia
+    'label_map'=>[
+      '+1'=>$classLabels[0] ?? null,
+      '-1'=>$classLabels[1] ?? null
+    ],
     'feature_index'=>$baseIndex,
     'numeric_minmax'=>$nums,
     'kernel'=>$kcfg['type'],
@@ -385,8 +469,12 @@ $db->query("CREATE TABLE IF NOT EXISTS `{$logTable}`(
 )");
 
 $status='success';
-$output="SVM {$kcfg['type']}. source={$sourceTable}; goal={$goalKey}; classes={$posLabel}|{$negLabel}; ".
-        "samples={$n}; acc_train=".number_format($acc*100,2)."%; ".
+$classesStr = implode('|', $classLabels);
+$output="SVM {$kcfg['type']}. source={$sourceTable}; goal={$goalKey}; classes={$classesStr}; ".
+        "samples_total={$totalSamples}; train={$nTrain}; test={$nTest}; ".
+        "acc_train=".number_format($trainAcc*100,2)."%; ".
+        "acc_test=".($testAcc!==null?number_format($testAcc*100,2):'NA')."%; ".
+        "threshold={$DECISION_THRESHOLD}; ".
         "Execution time=".number_format($duration,4)."s; epoch_avg=".number_format($avgEpoch,4)."s; ".
         "throughput=".number_format($throughput,1)." samples/s";
 $stmt=$db->prepare("INSERT INTO `{$logTable}`(status,execution_time,model_path,output,created_at,updated_at)
@@ -408,8 +496,14 @@ echo json_encode([
   'status'=>'success',
   'kernel'=>$kcfg['type'],
   'kernel_meta'=>$kernelMeta,
-  'samples'=>$n,
-  'train_accuracy'=>$acc,
+  'samples'=>[
+    'total'=>$totalSamples,
+    'train'=>$nTrain,
+    'test'=>$nTest,
+  ],
+  'train_accuracy'=>$trainAcc,
+  'test_accuracy'=>$testAcc,
+  'threshold'=>$DECISION_THRESHOLD,
   'execution_time'=>[
     'total_sec'=>$duration,
     'avg_epoch'=>$avgEpoch,
@@ -418,7 +512,8 @@ echo json_encode([
   'hyperparams'=>[
     'epochs'=>$epochs,
     'lambda'=>$lambda,
-    'eta0'=>$eta0
+    'eta0'=>$eta0,
+    'test_ratio'=>$testRatio
   ],
   'model_path'=>$modelPath,
   'source_table'   => $sourceTable,   // <= tambahkan ini

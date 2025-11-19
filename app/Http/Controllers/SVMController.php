@@ -70,7 +70,25 @@ class SVMController extends Controller
             }
         } catch (\Throwable $e) { /* ignore */ }
 
-        return view('admin.menu.SVM', compact('atributs','goalAttr','valuesByAttr','goalValues','svmData'))
+        // Distribusi kelas di case_user_{userId} (untuk UI)
+        $classStats = collect();
+        try {
+            $caseTable = "case_user_{$userId}";
+            if ($goalAttr && Schema::hasTable($caseTable)) {
+                $goalCol = $goalAttr->atribut_id . '_' . $goalAttr->atribut_name;
+                $classStats = DB::table($caseTable)
+                    ->selectRaw("`{$goalCol}` as label, COUNT(*) as total")
+                    ->whereNotNull($goalCol)
+                    ->where($goalCol, '!=', '')
+                    ->groupBy($goalCol)
+                    ->orderByDesc('total')
+                    ->get();
+            }
+        } catch (\Throwable $e) {
+            $classStats = collect();
+        }
+
+        return view('admin.menu.SVM', compact('atributs','goalAttr','valuesByAttr','goalValues','svmData','classStats'))
             ->with(['message' => null]);
     }
 
@@ -176,7 +194,19 @@ class SVMController extends Controller
         $ok = "Training OK:\n" . ($train['stdout'] ?? '(no stdout)') . "\n\n"
             . "Prediksi:\n" . $pred['summary'];
 
-        return back()->with('svm_ok', $ok);
+        $meta = $train['json'] ?? [];
+        $meta['predict'] = [
+            'label'      => $pred['label'],
+            'margin'     => $pred['margin'],
+            'confidence' => $pred['confidence'] ?? null,
+            'kernel'     => $pred['kernel'],
+            'goal_key'   => $pred['goal_key'],
+            'top'        => $pred['top'] ?? [],
+        ];
+
+        return back()
+            ->with('svm_ok', $ok)
+            ->with('svm_meta', $meta);
     }
 
     /* ===========================================================
@@ -535,6 +565,8 @@ class SVMController extends Controller
         $baseIndex   = $model['feature_index'] ?? [];
         $numMinmax   = $model['numeric_minmax'] ?? [];
         $labelMap    = $model['label_map'] ?? ['+1'=>'POS','-1'=>'NEG'];
+        $classes     = $model['classes'] ?? null;             // multi-class (jika ada)
+        $numClasses  = is_array($classes) ? count($classes) : null;
         $kernelType  = $model['kernel'] ?? $kernelShort;
         $kernelMeta  = $model['kernel_meta'] ?? [];
         $W           = $model['weights'];
@@ -565,23 +597,74 @@ class SVMController extends Controller
             }
         }
 
-        // kernel map + bias + dot
+        // kernel map + bias
         $z = $this->applyKernel($xBase, $kernelType, $kernelMeta, $baseIndex, $numMinmax);
         $z[] = 1.0;
 
-        $dot = 0.0;
-        for ($k=0; $k<count($z); $k++) $dot += ($W[$k] ?? 0.0) * $z[$k];
-        $predSign = ($dot >= 0) ? '+1' : '-1';
-        $predLbl  = $labelMap[$predSign] ?? $predSign;
+        // Hitung skor & confidence untuk semua kelas
+        $classScores = [];
+        if (is_array($classes) && isset($W[0]) && is_array($W[0])) {
+            $L = count($z);
+            foreach ($classes as $idx => $lbl) {
+                $s = 0.0;
+                for ($k=0; $k<$L; $k++) {
+                    $s += ($W[$idx][$k] ?? 0.0) * $z[$k];
+                }
+                $c = 1.0 / (1.0 + exp(-abs($s)));
+                $c = max(0.0, min(1.0, $c));
+                $classScores[] = [
+                    'label'      => $lbl,
+                    'margin'     => (float)$s,
+                    'confidence' => $c,
+                ];
+            }
+        } else {
+            // Backward-compat: model binary lama
+            $s = 0.0;
+            for ($k=0; $k<count($z); $k++) {
+                $s += ($W[$k] ?? 0.0) * $z[$k];
+            }
+            $sign = ($s >= 0) ? '+1' : '-1';
+            $lbl  = $labelMap[$sign] ?? $sign;
+            $c = 1.0 / (1.0 + exp(-abs($s)));
+            $c = max(0.0, min(1.0, $c));
+            $classScores[] = [
+                'label'      => $lbl,
+                'margin'     => (float)$s,
+                'confidence' => $c,
+            ];
+        }
+
+        // Urutkan berdasarkan confidence (descending)
+        usort($classScores, function(array $a, array $b): int {
+            return ($b['confidence'] <=> $a['confidence']);
+        });
+
+        // Ambil prediksi utama dari kelas dengan confidence tertinggi
+        $predLbl = 'UNKNOWN';
+        $dot     = 0.0;
+        $conf    = 0.0;
+        if (!empty($classScores)) {
+            $best   = $classScores[0];
+            $predLbl = $best['label'];
+            $dot     = $best['margin'];
+            $conf    = $best['confidence'];
+        }
+
+        // Top-k (mis. 3) label teratas dengan confidence
+        $top = array_slice($classScores, 0, 3);
 
         return [
-            'label'   => $predLbl,
-            'margin'  => (float)$dot,
-            'goal_key'=> $goalKey,
-            'kernel'  => $kernelType,
-            'summary' => "Predict : {$predLbl} (margin=".number_format($dot,4).")\n".
-                         "GoalCol : {$goalKey}\n".
-                         "Kernel  : {$kernelType}"
+            'label'      => $predLbl,
+            'margin'     => (float)$dot,
+            'goal_key'   => $goalKey,
+            'kernel'     => $kernelType,
+            'confidence' => $conf,
+            'top'        => $top,
+            'summary'    => "Predict : {$predLbl} (margin=".number_format($dot,4).")\n".
+                            "Confidence (est.) : ".number_format($conf*100,2)."%\n".
+                            "GoalCol : {$goalKey}\n".
+                            "Kernel  : {$kernelType}"
         ];
     }
 

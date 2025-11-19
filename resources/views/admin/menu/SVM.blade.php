@@ -5,6 +5,29 @@
   <h2>Support Vector Machine (SVM)</h2>
   <hr>
 
+  {{-- Distribusi kelas di case_user (data training) --}}
+  @if(isset($classStats) && count($classStats) > 0)
+    @php
+      $totalCases = $classStats->sum('total');
+    @endphp
+    <div class="card mb-3">
+      <div class="card-header fw-semibold">Distribusi Data Training (case_user_{{ Auth::id() }})</div>
+      <div class="card-body">
+        <ul class="mb-0">
+          @foreach($classStats as $row)
+            @php
+              $p = $totalCases > 0 ? ($row->total / $totalCases) * 100 : 0;
+            @endphp
+            <li>
+              {{ $row->label }} &mdash;
+              {{ $row->total }} data ({{ number_format($p, 1) }}%)
+            </li>
+          @endforeach
+        </ul>
+      </div>
+    </div>
+  @endif
+
   {{-- Flash --}}
   @if(session('svm_ok'))
     <div class="alert alert-success"><pre class="mb-0">{{ session('svm_ok') }}</pre></div>
@@ -12,10 +35,59 @@
   @if(session('svm_err'))
     <div class="alert alert-danger"><pre class="mb-0">{{ session('svm_err') }}</pre></div>
   @endif
+  @php $meta = session('svm_meta'); @endphp
+  @if(is_array($meta) && !empty($meta))
+    @php
+      $samples   = $meta['samples']      ?? [];
+      $predict   = $meta['predict']      ?? [];
+      $predConf  = $predict['confidence'] ?? null;
+      $predLabel = $predict['label']      ?? null;
+      $threshold = $meta['threshold']      ?? null;
+      $hyper     = $meta['hyperparams']    ?? [];
+    @endphp
+    <div class="alert alert-info">
+      <strong>Hasil predict SVM (Generate &amp; Predict):</strong>
+      <ul class="mb-0">
+        <li>Jumlah data: latih = {{ $samples['train'] ?? '?' }}, uji = {{ $samples['test'] ?? '?' }} (total = {{ $samples['total'] ?? '?' }})</li>
+        <li>Prediksi terakhir: {{ $predLabel ?? '(tidak tersedia)' }}</li>
+        <li>
+          Akurasi prediksi (estimasi keyakinan):
+          @if($predConf !== null)
+            {{ number_format($predConf*100,2) }}%
+            @if($predConf < 0.7)
+              <span class="text-warning">(model kurang yakin, &lt; 70%)</span>
+            @else
+              <span class="text-success">(model cukup/sangat yakin)</span>
+            @endif
+          @else
+            NA
+          @endif
+        </li>
+        @php $top = $predict['top'] ?? []; @endphp
+        @if(is_array($top) && count($top) > 0)
+          <li>
+            Top rekomendasi jurusan:
+            <ol class="mb-0">
+              @foreach($top as $item)
+                <li>
+                  {{ $item['label'] ?? '?' }}
+                  ({{ isset($item['confidence']) ? number_format($item['confidence']*100,2) . '%' : 'NA' }})
+                </li>
+              @endforeach
+            </ol>
+          </li>
+        @endif
+        <li>Threshold keputusan: {{ $threshold !== null ? $threshold : 'default (0.0)' }}</li>
+        <li>Hyperparameter: epochs = {{ $hyper['epochs'] ?? '?' }}, lambda = {{ $hyper['lambda'] ?? '?' }}, eta0 = {{ $hyper['eta0'] ?? '?' }}, test_ratio = {{ $hyper['test_ratio'] ?? '0.2' }}</li>
+      </ul>
+    </div>
+  @endif
 
   {{-- ======== TRAIN MANUAL (case_num & sumber training otomatis) ======== --}}
   <div class="card mb-4">
-    <div class="card-header fw-semibold">Train (Otomatis: case_user_{userId})</div>
+    <div class="card-header fw-semibold">
+      Train (Otomatis: case_user_{{ Auth::id() }})
+    </div>
     <div class="card-body">
       <form action="{{ route('SVM.generate') }}" method="POST" class="row g-3">
         @csrf

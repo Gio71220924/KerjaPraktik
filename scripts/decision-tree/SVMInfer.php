@@ -79,6 +79,8 @@ $W          = $model['weights'] ?? null;
 $biasIndex  = $model['bias_index'] ?? null;
 $goalCol    = $model['goal_column'] ?? null;
 $labelMap   = $model['label_map'] ?? ['+1'=>'POS','-1'=>'NEG'];
+$classes    = $model['classes'] ?? null;            // multi-class: daftar label
+$numClasses = is_array($classes) ? count($classes) : null;
 $baseIndex  = $model['feature_index'] ?? [];
 $numMinmax  = $model['numeric_minmax'] ?? [];
 $kernelType = $model['kernel'] ?? 'sgd';
@@ -197,8 +199,26 @@ while($r=$cases->fetch_assoc()){
   $z=applyKernel($xBase,$kernelType,$kernelMeta,$baseIndex);
   $z[] = 1.0;
 
-  $dot=0.0; for($i=0;$i<count($z);$i++) $dot+=($W[$i]??0.0)*$z[$i];
-  $sign=($dot>=0)?'+1':'-1'; $pred=$labelMap[$sign] ?? $sign;
+  // Jika model multi-class (weights matriks & ada 'classes'), pilih kelas dengan skor tertinggi
+  if (is_array($classes) && isset($W[0]) && is_array($W[0])) {
+    $bestIdx = null;
+    $bestScore = null;
+    $L = count($z);
+    for ($c=0; $c<$numClasses; $c++) {
+      $dot = 0.0;
+      for ($i=0; $i<$L; $i++) $dot += ($W[$c][$i] ?? 0.0) * $z[$i];
+      if ($bestScore === null || $dot > $bestScore) {
+        $bestScore = $dot;
+        $bestIdx   = $c;
+      }
+    }
+    $pred = $classes[$bestIdx] ?? 'UNKNOWN';
+    $dot  = (float)$bestScore;
+  } else {
+    // Backward-compat: model binary lama (label_map +1/-1)
+    $dot=0.0; for($i=0;$i<count($z);$i++) $dot+=($W[$i]??0.0)*$z[$i];
+    $sign=($dot>=0)?'+1':'-1'; $pred=$labelMap[$sign] ?? $sign;
+  }
 
   $goalKey = $goalCol ?: (array_key_exists('goal',$r)?'goal':null);
   $actual  = $goalKey && array_key_exists($goalKey,$r) ? (string)$r[$goalKey] : '';
