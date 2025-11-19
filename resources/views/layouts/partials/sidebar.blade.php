@@ -34,6 +34,11 @@
                 Decision Tree
             </a>
 
+            <a class="nav-link" href="{{ url('SupportVectorMachine') }}">
+                <div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>
+                Support Vector Machine
+            </a>
+
             <a class="nav-link" href="{{ url('rule') }}">
                 <div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>
                 Rule

@@ -15,7 +15,7 @@ $user_id = $argv[1];  // Parameter pertama, user_id
 $case_num = $argv[2];  // Parameter kedua, case_num
 
 // Create connection
-$conn = new mysqli($servername, $username, $password, $dbname);
+$conn = new mysqli($servername, $username, $password, $dbname, 3307);
 // Check connection
 if ($conn->connect_error) {
   die("Connection failed: " . $conn->connect_error);

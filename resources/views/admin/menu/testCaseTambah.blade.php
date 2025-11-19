@@ -16,8 +16,8 @@
     @endif
 
     <form action="{{ route('test.case.store') }}" method="POST">
-        {{-- {{ route('inference.generate', ['user_id' => Auth::id(), 'case_num' => Auth::id()]) }} --}}
         @csrf
+
         <div class="row">
             @php
                 $atributCount = count($atributs); // Total atribut
@@ -49,7 +49,7 @@
                             </select>
                         </div>
                     @endfor
-                </div>
+                </div>  
             @endfor
         </div>
     
@@ -57,12 +57,4 @@
         <button type="submit" name="action_type" value="Forward Chaining" class="btn btn-primary">Forward Chaining</button>
         <button type="submit" name="action_type" value="Backward Chaining" class="btn btn-primary">Backward Chaining</button>
     </form>
-    <br>
-    {{-- <form action="#">
-        <button type="submit" name="action_type" value="fc" class="btn btn-primary">Forward Chaining</button>
-    </form>
-    <br>
-    <form action="#">
-        <button type="submit" name="action_type" value="bc" class="btn btn-primary">Backward Chaining</button>
-    </form> --}}
 @endsection
