@@ -761,12 +761,15 @@ class SVMController extends Controller
         ];
 
         foreach ($cols as $col => $ddl) {
-            if (!Schema::hasColumn($table, $col)) {
-                try {
+            try {
+                if (!Schema::hasColumn($table, $col)) {
                     DB::statement("ALTER TABLE `{$table}` ADD COLUMN `{$col}` {$ddl}");
-                } catch (\Throwable $e) {
-                    // jika gagal (mis. hak akses), biarkan supaya error/log tampil jelas
+                } elseif ($col === 'user_id') {
+                    // Pastikan user_id nullable agar tabel lama yang NOT NULL tidak memblok insert
+                    DB::statement("ALTER TABLE `{$table}` MODIFY COLUMN `user_id` INT NULL");
                 }
+            } catch (\Throwable $e) {
+                // jika gagal (mis. hak akses), biarkan supaya error/log tampil jelas
             }
         }
     }
