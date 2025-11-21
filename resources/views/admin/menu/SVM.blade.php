@@ -80,6 +80,71 @@
         <li>Threshold keputusan: {{ $threshold !== null ? $threshold : 'default (0.0)' }}</li>
         <li>Hyperparameter: epochs = {{ $hyper['epochs'] ?? '?' }}, lambda = {{ $hyper['lambda'] ?? '?' }}, eta0 = {{ $hyper['eta0'] ?? '?' }}, test_ratio = {{ $hyper['test_ratio'] ?? '0.2' }}</li>
       </ul>
+
+      {{-- Visualisasi sederhana setelah Generate & Predict --}}
+      @php
+        $confPercent = $predConf !== null ? max(0, min(100, $predConf * 100)) : null;
+      @endphp
+      @if($confPercent !== null || (is_array($top) && count($top) > 0))
+        <hr>
+        <div class="mt-2">
+          <h6 class="mb-2">Visualisasi Hasil Prediksi</h6>
+
+          {{-- Bar utama untuk label terprediksi --}}
+          @if($confPercent !== null)
+            <div class="mb-3">
+              <div class="d-flex justify-content-between mb-1">
+                <span>Prediksi: <strong>{{ $predLabel }}</strong></span>
+                <span>{{ number_format($confPercent, 2) }}%</span>
+              </div>
+              <div class="progress" style="height: 18px;">
+                <div
+                  class="progress-bar {{ $confPercent < 70 ? 'bg-warning' : 'bg-success' }}"
+                  role="progressbar"
+                  style="width: {{ $confPercent }}%;"
+                  aria-valuenow="{{ $confPercent }}"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                ></div>
+              </div>
+            </div>
+          @endif
+
+          {{-- Bar untuk top-N rekomendasi --}}
+          @if(is_array($top) && count($top) > 0)
+            <div>
+              <small class="text-muted d-block mb-1">Top rekomendasi (semakin panjang bar, semakin tinggi keyakinan):</small>
+              @foreach($top as $item)
+                @php
+                  $c = isset($item['confidence']) ? max(0, min(100, $item['confidence'] * 100)) : null;
+                @endphp
+                <div class="mb-2">
+                  <div class="d-flex justify-content-between">
+                    <span>{{ $item['label'] ?? '?' }}</span>
+                    <span>{{ $c !== null ? number_format($c,2).'%' : 'NA' }}</span>
+                  </div>
+                  @if($c !== null)
+                    <div class="progress" style="height: 12px;">
+                      <div
+                        class="progress-bar bg-info"
+                        role="progressbar"
+                        style="width: {{ $c }}%;"
+                        aria-valuenow="{{ $c }}"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                      ></div>
+                    </div>
+                  @else
+                    <div class="progress" style="height: 12px;">
+                      <div class="progress-bar bg-secondary" style="width: 100%;"></div>
+                    </div>
+                  @endif
+                </div>
+              @endforeach
+            </div>
+          @endif
+        </div>
+      @endif
     </div>
   @endif
 
