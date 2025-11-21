@@ -66,7 +66,7 @@
         @php $top = $predict['top'] ?? []; @endphp
         @if(is_array($top) && count($top) > 0)
           <li>
-            Top rekomendasi jurusan:
+            Top rekomendasi keputusan:
             <ol class="mb-0">
               @foreach($top as $item)
                 <li>
