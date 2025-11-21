@@ -124,11 +124,33 @@
             </tr>
             <tr>
                 <th>Algorithm</th>
-                <td>{{ $algorithmName }}</td>
+                <td>
+                    @php
+                        $algo = $algorithmName;
+                        $rg   = strtolower((string)($detail->rule_goal ?? ''));
+                        if (!$algo) {
+                            if (str_contains($rg, 'forward')) {
+                                $algo = 'Forward Chaining';
+                            } elseif (str_contains($rg, 'backward')) {
+                                $algo = 'Backward Chaining';
+                            } elseif (str_contains($rg, 'matching')) {
+                                $algo = 'Matching Rule';
+                            } elseif (str_contains($rg, 'kernel=')) {
+                                $algo = 'Support Vector Machine';
+                            }
+                        }
+                    @endphp
+                    {{ $algo ?? 'Unknown' }}
+                </td>
             </tr>
             <tr>
                 <th>Execution Time</th>
-                <td>{{ $detail->waktu }}</td>
+                <td>
+                    @php
+                        $timeVal = $detail->waktu ?? $detail->exec_time ?? null;
+                    @endphp
+                    {{ $timeVal !== null ? $timeVal : '-' }}
+                </td>
             </tr>
         @endforeach
         </tbody>

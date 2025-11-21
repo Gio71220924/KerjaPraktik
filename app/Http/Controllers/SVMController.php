@@ -346,6 +346,7 @@ class SVMController extends Controller
             table:     $table,
             caseId:    $caseId,
             ruleId:    null,
+            caseGoal:  "{$goalKey} = {$goalLabel}",
             ruleGoal:  "{$goalKey} = {$goalLabel} | kernel={$kernel}",
             match:     $margin,
             execTime:  $execTime,
@@ -387,6 +388,7 @@ class SVMController extends Controller
         string $table,
         string $caseId,
         ?int $ruleId,
+        string $caseGoal,
         string $ruleGoal,
         float $match,
         ?float $execTime,
@@ -397,6 +399,7 @@ class SVMController extends Controller
               id INT AUTO_INCREMENT PRIMARY KEY,
               case_id INT NULL,
               rule_id INT NULL,
+              user_id INT NULL,
               rule_goal LONGTEXT NULL,
               match_value DECIMAL(18,6) NULL,
               waktu DECIMAL(18,8) NULL,
@@ -406,9 +409,14 @@ class SVMController extends Controller
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ");
 
+        // Tambah kolom yang mungkin belum ada pada tabel lama
+        $this->ensureInferenceGenericColumns($table);
+
         DB::table($table)->insert([
             'case_id'     => (int)$caseId,
             'rule_id'     => $ruleId,
+            'user_id'     => $userId,
+            'case_goal'   => $caseGoal,
             'rule_goal'   => $ruleGoal,
             'match_value' => $match,
             'waktu'       => $execTime,
@@ -732,5 +740,34 @@ class SVMController extends Controller
         }
 
         return $xBase;
+    }
+
+    /**
+     * Pastikan tabel inferensi generik punya kolom minimal yang dibutuhkan agar insert tidak gagal.
+     */
+    private function ensureInferenceGenericColumns(string $table): void
+    {
+        $cols = [
+            'case_id'     => 'INT NULL',
+            'rule_id'     => 'INT NULL',
+            'user_id'     => 'INT NULL',
+            'case_goal'   => 'LONGTEXT NULL',
+            'rule_goal'   => 'LONGTEXT NULL',
+            'match_value' => 'DECIMAL(18,6) NULL',
+            'waktu'       => 'DECIMAL(18,8) NULL',
+            'kernel'      => 'VARCHAR(255) NULL',
+            'created_at'  => 'TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP',
+            'updated_at'  => 'TIMESTAMP NULL DEFAULT NULL',
+        ];
+
+        foreach ($cols as $col => $ddl) {
+            if (!Schema::hasColumn($table, $col)) {
+                try {
+                    DB::statement("ALTER TABLE `{$table}` ADD COLUMN `{$col}` {$ddl}");
+                } catch (\Throwable $e) {
+                    // jika gagal (mis. hak akses), biarkan supaya error/log tampil jelas
+                }
+            }
+        }
     }
 }
