@@ -75,8 +75,10 @@ class AuthController extends Controller
 
         // Cek apakah user ditemukan dan password cocok
         if ($user && $this->passwordMatchesAndRehash($user, $request->password)) {
+            $userRole = strtolower((string)($user->role ?: 'user'));
+
             // Cek apakah user adalah admin
-            if ($user->role === 'user') {
+            if ($userRole === 'user') {
                 if ($user->active === 'Inactive') {
                     return back()->withErrors(['username' => 'Your account is inactive. Please contact admin.']);
                 }
@@ -112,8 +114,10 @@ class AuthController extends Controller
 
         // Cek apakah user ditemukan dan password cocok
         if ($user && $this->passwordMatchesAndRehash($user, $request->password)) {
+            $userRole = strtolower((string)($user->role ?: 'user'));
+
             // Cek apakah user adalah admin
-            if ($user->role === 'admin') {
+            if ($userRole === 'admin') {
                 // Login user
                 Auth::login($user);
 
