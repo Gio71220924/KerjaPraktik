@@ -412,9 +412,12 @@ class SVMController extends Controller
         // Tambah kolom yang mungkin belum ada pada tabel lama
         $this->ensureInferenceGenericColumns($table);
 
+        // Legacy tables may have rule_id NOT NULL; avoid NULL insert
+        $ruleIdVal = $ruleId ?? 0;
+
         DB::table($table)->insert([
             'case_id'     => (int)$caseId,
-            'rule_id'     => $ruleId,
+            'rule_id'     => $ruleIdVal,
             'user_id'     => $userId,
             'case_goal'   => $caseGoal,
             'rule_goal'   => $ruleGoal,
@@ -613,17 +616,27 @@ class SVMController extends Controller
         $classScores = [];
         if (is_array($classes) && isset($W[0]) && is_array($W[0])) {
             $L = count($z);
+            // Ambil skor linear
+            $logits = [];
             foreach ($classes as $idx => $lbl) {
                 $s = 0.0;
                 for ($k=0; $k<$L; $k++) {
                     $s += ($W[$idx][$k] ?? 0.0) * $z[$k];
                 }
-                $c = 1.0 / (1.0 + exp(-abs($s)));
-                $c = max(0.0, min(1.0, $c));
+                $logits[$idx] = $s;
+            }
+            // Softmax untuk menghasilkan probabilitas yang ter-normalisasi
+            $maxLogit = max($logits);
+            $expSum = 0.0;
+            foreach ($logits as $v) {
+                $expSum += exp($v - $maxLogit);
+            }
+            foreach ($classes as $idx => $lbl) {
+                $prob = $expSum > 0 ? exp($logits[$idx] - $maxLogit) / $expSum : 0.0;
                 $classScores[] = [
                     'label'      => $lbl,
-                    'margin'     => (float)$s,
-                    'confidence' => $c,
+                    'margin'     => (float)$logits[$idx],
+                    'confidence' => max(0.0, min(1.0, $prob)),
                 ];
             }
         } else {
@@ -632,14 +645,19 @@ class SVMController extends Controller
             for ($k=0; $k<count($z); $k++) {
                 $s += ($W[$k] ?? 0.0) * $z[$k];
             }
-            $sign = ($s >= 0) ? '+1' : '-1';
-            $lbl  = $labelMap[$sign] ?? $sign;
-            $c = 1.0 / (1.0 + exp(-abs($s)));
-            $c = max(0.0, min(1.0, $c));
+            $pPos = 1.0 / (1.0 + exp(-$s)); // prob kelas +1
+            $pNeg = 1.0 - $pPos;            // prob kelas -1
+            $posLbl = $labelMap['+1'] ?? '+1';
+            $negLbl = $labelMap['-1'] ?? '-1';
             $classScores[] = [
-                'label'      => $lbl,
+                'label'      => $posLbl,
                 'margin'     => (float)$s,
-                'confidence' => $c,
+                'confidence' => max(0.0, min(1.0, $pPos)),
+            ];
+            $classScores[] = [
+                'label'      => $negLbl,
+                'margin'     => (float)$s,
+                'confidence' => max(0.0, min(1.0, $pNeg)),
             ];
         }
 

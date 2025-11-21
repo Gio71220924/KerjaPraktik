@@ -27,7 +27,7 @@ function envv(string $k, $d=null){
 $SAVE_MODEL          = filter_var(envv('SVM_SAVE_MODEL','1'), FILTER_VALIDATE_BOOLEAN);
 $MODEL_DIR_FALLBACK  = getcwd() . DIRECTORY_SEPARATOR . 'svm_models';
 // Default proporsi data uji dan threshold keputusan (bisa dioverride via ENV / CLI)
-$DEFAULT_TEST_RATIO  = (float)envv('SVM_TEST_RATIO','0.2');   // 20% untuk uji
+$DEFAULT_TEST_RATIO  = (float)envv('SVM_TEST_RATIO','0.3');   // 30% untuk uji (70/30)
 $DECISION_THRESHOLD  = (float)envv('SVM_THRESHOLD','0.0');    // dot >= threshold => kelas +1
 
 ///////////////////////////// HELPERS /////////////////////////////////
