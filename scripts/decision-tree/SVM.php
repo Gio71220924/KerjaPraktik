@@ -326,15 +326,51 @@ if(!$X) log_and_exit_fail($db,$userId,"Tidak ada sampel valid. total={$total} ko
 
 ///////////////////////////// SPLIT TRAIN/TEST //////////////////////
 $totalSamples = count($X);
-$indices = range(0,$totalSamples-1);
-// seed khusus split agar reproducible (terpisah dari SGD)
-mt_srand(123);
-shuffle($indices);
-$testCount = (int)round($testRatio * $totalSamples);
-if($testCount < 1) $testCount = 1;
-if($testCount >= $totalSamples) $testCount = $totalSamples-1;
-$testIdx  = array_slice($indices,0,$testCount);
-$trainIdx = array_slice($indices,$testCount);
+
+// Stratified random split per kelas supaya 70/30 tidak sekuensial
+$splitSeedEnv = envv('SVM_SPLIT_SEED', null);
+if($splitSeedEnv !== null && $splitSeedEnv!==''){
+  mt_srand((int)$splitSeedEnv);
+}else{
+  $autoSeed = (int)(microtime(true) * 1000000);
+  try{ $autoSeed ^= random_int(PHP_INT_MIN, PHP_INT_MAX); }catch(Throwable $e){}
+  mt_srand($autoSeed);
+}
+
+$buckets = [];
+foreach($y as $idx=>$clsIdx){
+  if(!isset($buckets[$clsIdx])) $buckets[$clsIdx]=[];
+  $buckets[$clsIdx][]=$idx;
+}
+
+$trainIdx=[]; $testIdx=[];
+foreach($buckets as $clsIdx=>$idxList){
+  shuffle($idxList);
+  $nCls=count($idxList);
+  $tCount=(int)round($testRatio*$nCls);
+  if($tCount >= $nCls && $nCls>1) $tCount=$nCls-1; // sisakan minimal 1 untuk train
+  if($tCount===0 && $nCls>1 && $testRatio>0.0) $tCount=1; // jaga-jaga supaya ada sampel uji
+  $testIdx=array_merge($testIdx, array_slice($idxList,0,$tCount));
+  $trainIdx=array_merge($trainIdx, array_slice($idxList,$tCount));
+}
+
+// fallback: jika tidak ada test set sama sekali, paksa ambil 1 dari bucket terbesar
+if(!$testIdx && $totalSamples>1){
+  $largest=null; $maxN=0;
+  foreach($buckets as $clsIdx=>$idxList){
+    $cnt=count($idxList);
+    if($cnt>$maxN){ $maxN=$cnt; $largest=$idxList; }
+  }
+  if($largest){
+    shuffle($largest);
+    $picked=array_shift($largest);
+    $testIdx[]=$picked;
+    $trainIdx=array_values(array_filter($trainIdx,function($v) use($picked){ return $v!==$picked; }));
+  }
+}
+
+shuffle($trainIdx);
+shuffle($testIdx);
 
 $Xtrain = []; $ytrain = [];
 $Xtest  = []; $ytest  = [];
