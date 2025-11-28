@@ -42,6 +42,7 @@
       $predict   = $meta['predict']      ?? [];
       $predConf  = $predict['confidence'] ?? null;
       $predLabel = $predict['label']      ?? null;
+      $predKernel= $predict['kernel']      ?? ($meta['kernel'] ?? null);
       $threshold = $meta['threshold']      ?? null;
       $hyper     = $meta['hyperparams']    ?? [];
     @endphp
@@ -50,6 +51,7 @@
       <ul class="mb-0">
         <li>Jumlah data: latih = {{ $samples['train'] ?? '?' }}, uji = {{ $samples['test'] ?? '?' }} (total = {{ $samples['total'] ?? '?' }})</li>
         <li>Prediksi terakhir: {{ $predLabel ?? '(tidak tersedia)' }}</li>
+        <li>Kernel yang dipilih: {{ $predKernel ?? '(tidak tersedia)' }}</li>
         <li>
           Akurasi prediksi (estimasi keyakinan):
           @if($predConf !== null)
