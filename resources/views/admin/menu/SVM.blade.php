@@ -163,8 +163,8 @@
           <label class="form-label">Kernel</label>
           <select name="kernel" class="form-select">
             <option value="sgd">SGD (Linear)</option>
-            <option value="rbf:D=1024:gamma=0.25">RBF — D=1024, γ=0.25</option>
-            <option value="sigmoid:D=1024:scale=1.0:coef0=0.0">Sigmoid — D=1024, scale=1.0, coef0=0.0</option>
+            <option value="rbf:D=128:gamma=0.25">RBF — D=128, γ=0.25</option>
+            <option value="sigmoid:D=128:scale=1.0:coef0=0.0">Sigmoid — D=128, scale=1.0, coef0=0.0</option>
           </select>
         </div>
         <div class="col-md-3 d-flex align-items-end">
@@ -188,8 +188,8 @@
             {{-- Hanya untuk UI; nilai sebenarnya dikirim lewat hidden #kernelHidden --}}
             <select id="kernelSelect" class="form-select" required>
               <option value="sgd" selected>SGD (Linear)</option>
-              <option value="rbf:D=1024:gamma=0.25">RBF — D=1024, γ=0.25</option>
-              <option value="sigmoid:D=1024:scale=1.0:coef0=0.0">Sigmoid — D=1024, scale=1.0, coef0=0.0</option>
+              <option value="rbf:D=128:gamma=0.25">RBF — D=128, γ=0.25</option>
+              <option value="sigmoid:D=128:scale=1.0:coef0=0.0">Sigmoid — D=128, scale=1.0, coef0=0.0</option>
               <option value="custom">Custom…</option>
             </select>
             <small class="text-muted">Format: <code>sgd</code>, <code>rbf:D=...:gamma=...</code>, <code>sigmoid:D=...:scale=...:coef0=...</code></small>
@@ -207,7 +207,7 @@
           </div>
           <div class="col-md-2 d-none" id="customDWrap">
             <label class="form-label">D</label>
-            <input type="number" min="1" step="1" id="customD" class="form-control" value="1024">
+            <input type="number" min="1" step="1" id="customD" class="form-control" value="128">
           </div>
           <div class="col-md-2 d-none" id="customGammaWrap">
             <label class="form-label">gamma (RBF)</label>

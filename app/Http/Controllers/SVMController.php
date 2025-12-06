@@ -100,7 +100,7 @@ class SVMController extends Controller
         $kernel = (string)$request->input('kernel', 'sgd');
         $table  = "case_user_{$userId}";
 
-        $train = $this->runTraining($userId, $userId, $kernel, redirectBack: false, tableOverride: $table);
+        $train = $this->runTraining($userId, $userId, $kernel, false, $table);
 
         if ($train['error'] ?? false) {
             return back()->with('svm_err', "Training gagal:\n" . ($train['message'] ?? ''));
@@ -155,7 +155,7 @@ class SVMController extends Controller
         $tableSrc  = "case_user_{$userId}"; // train dari case_user
 
         // TRAIN
-        $train = $this->runTraining($userId, $userId, $kernel, redirectBack: false, tableOverride: $tableSrc);
+        $train = $this->runTraining($userId, $userId, $kernel, false, $tableSrc);
         if ($train['error'] ?? false) {
             return back()->with('svm_err', "Training gagal:\n" . ($train['message'] ?? ''));
         }
@@ -441,6 +441,11 @@ class SVMController extends Controller
         bool $redirectBack = true,
         ?string $tableOverride = null
     ) {
+        // Pastikan eksekusi web tidak dipotong 30s (nginx/apache) saat menunggu proses CLI
+        @ini_set('max_execution_time', '0');
+        @set_time_limit(0);
+        @ignore_user_abort(true);
+
         $phpBin = env('PHP_BIN');
         if (!$phpBin) {
             $finder = new PhpExecutableFinder();
@@ -461,7 +466,16 @@ class SVMController extends Controller
                 : ['error' => true, 'message' => $msg];
         }
 
-        $cmd = [$phpBin, $script, (string)$userId, (string)$caseNum, $kernel];
+        $memoryLimit = env('SVM_MEMORY_LIMIT', '1024M');
+        $cmd = [$phpBin, '-d', 'max_execution_time=0'];
+        if ($memoryLimit) {
+            $cmd[] = '-d';
+            $cmd[] = 'memory_limit=' . $memoryLimit;
+        }
+        $cmd[] = $script;
+        $cmd[] = (string)$userId;
+        $cmd[] = (string)$caseNum;
+        $cmd[] = $kernel;
         if ($tableOverride) $cmd[] = "--table={$tableOverride}";
 
         $proc = new Process($cmd, base_path(), null, null, 600);
@@ -699,7 +713,7 @@ class SVMController extends Controller
         if ($type === 'sgd') return $xBase;
 
         if ($type === 'rbf') {
-            $D = (int)($meta['D'] ?? 1024);
+            $D = (int)($meta['D'] ?? 128);
             $gamma = (float)($meta['gamma'] ?? 0.25);
             $seed  = (int)($meta['seed'] ?? crc32(json_encode(array_keys($baseIndex))));
             mt_srand($seed);
@@ -729,7 +743,7 @@ class SVMController extends Controller
         }
 
         if ($type === 'sigmoid') {
-            $D=(int)($meta['D'] ?? 1024);
+            $D=(int)($meta['D'] ?? 128);
             $scale=(float)($meta['scale'] ?? 1.0);
             $coef0=(float)($meta['coef0'] ?? 0.0);
             $seed= (int)($meta['seed'] ?? (14641 ^ crc32(json_encode(array_keys($baseIndex)))));

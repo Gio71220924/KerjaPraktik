@@ -4,8 +4,8 @@ declare(strict_types=1);
 /**
  * SVM SGD (hinge + L2) dengan opsi kernel via feature map:
  *  - sgd (linear/identitas)
- *  - rbf:D=1024:gamma=0.25 (Random Fourier Features)
- *  - sigmoid:D=1024:scale=1.0:coef0=0.0 (random tanh features; aproksimasi praktis)
+ *  - rbf:D=256:gamma=0.25 (Random Fourier Features)
+ *  - sigmoid:D=256:scale=1.0:coef0=0.0 (random tanh features; aproksimasi praktis)
  *
  * Fitur:
  *  - Execution time: total, avg/epoch, throughput
@@ -25,6 +25,17 @@ function envv(string $k, $d=null){
 }
 
 $SAVE_MODEL          = filter_var(envv('SVM_SAVE_MODEL','1'), FILTER_VALIDATE_BOOLEAN);
+$MAX_EXEC_TIME_RAW   = envv('SVM_MAX_EXEC_TIME', '0');    // 0 = unlimited, atau isi detik
+$MAX_EXEC_TIME       = is_numeric($MAX_EXEC_TIME_RAW) ? (int)$MAX_EXEC_TIME_RAW : 0;
+$MEMORY_LIMIT        = envv('SVM_MEMORY_LIMIT', '-1'); // -1 = unlimited by default; override via env/ini jika ingin membatasi
+// Batas jumlah sampel (agar tidak makan RAM berlebihan)
+$DEFAULT_MAX_SAMPLES = (int)envv('SVM_MAX_SAMPLES', '0'); // 0 = unlimited secara default
+// Paksa hilangkan batas waktu proses CLI; refresh nilai di awal
+@ini_set('max_execution_time', (string)$MAX_EXEC_TIME);
+@set_time_limit($MAX_EXEC_TIME);
+if ($MEMORY_LIMIT) {
+  @ini_set('memory_limit', (string)$MEMORY_LIMIT);
+}
 $MODEL_DIR_FALLBACK  = getcwd() . DIRECTORY_SEPARATOR . 'svm_models';
 // Default proporsi data uji dan threshold keputusan (bisa dioverride via ENV / CLI)
 $DEFAULT_TEST_RATIO  = (float)envv('SVM_TEST_RATIO','0.3');   // 30% untuk uji (70/30)
@@ -49,6 +60,7 @@ function table_exists(mysqli $db,string $schema,string $table):bool{
   $q=$db->query("SELECT 1 FROM information_schema.tables WHERE table_schema='{$schema}' AND table_name='{$table}' LIMIT 1");
   return $q && $q->num_rows>0;
 }
+
 /** Kernel parser: 'sgd' | 'rbf[:D=...][:gamma=...]' | 'sigmoid[:D=...][:scale=...][:coef0=...]' */
 function parseKernel(string $spec): array{
   $parts=explode(':', strtolower(trim($spec)));
@@ -60,10 +72,20 @@ function parseKernel(string $spec): array{
       $cfg[$k]=is_numeric($v)?(float)$v:$v;
     }
   }
-  if($type==='rbf'){ $cfg['D']=(int)($cfg['D']??1024); $cfg['gamma']=(float)($cfg['gamma']??0.25); }
-  if($type==='sigmoid'){ $cfg['D']=(int)($cfg['D']??1024); $cfg['scale']=(float)($cfg['scale']??1.0); $cfg['coef0']=(float)($cfg['coef0']??0.0); }
+  if($type==='rbf'){
+    // default D dari 1024 -> 128 (lebih ringan)
+    $cfg['D']     = (int)($cfg['D'] ?? 128);
+    $cfg['gamma'] = (float)($cfg['gamma'] ?? 0.25);
+  }
+  if($type==='sigmoid'){
+    // default D dari 1024 -> 128 (lebih ringan)
+    $cfg['D']     = (int)($cfg['D'] ?? 128);
+    $cfg['scale'] = (float)($cfg['scale'] ?? 1.0);
+    $cfg['coef0'] = (float)($cfg['coef0'] ?? 0.0);
+  }
   return $cfg;
 }
+
 /** Build mapper: return [callable $mapFn, array $meta, int $outDim] */
 function buildFeatureMapper(array $baseIndex,array $kcfg): array{
   $B=count($baseIndex);
@@ -74,56 +96,49 @@ function buildFeatureMapper(array $baseIndex,array $kcfg): array{
     return [$f, ['type'=>'sgd'], $B];
   }
 
-  // RBF: Random Fourier Features
+  // RBF: Random Fourier Features (generate bobot on-the-fly supaya tidak memakan RAM besar)
   if($kcfg['type']==='rbf'){
     $D=(int)$kcfg['D']; $gamma=(float)$kcfg['gamma'];
-    $seed=crc32(json_encode(array_keys($baseIndex))); mt_srand($seed);
-    $omega=[];
-    for($j=0;$j<$D;$j++){
-      $row=[];
-      for($k=0;$k<$B;$k++){
-        $u1=max(mt_rand()/mt_getrandmax(),1e-12);
-        $u2=mt_rand()/mt_getrandmax();
-        $z=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2); // ~N(0,1)
-        $row[]=sqrt(2.0*$gamma)*$z;
-      }
-      $omega[]=$row;
-    }
-    $b=[]; for($j=0;$j<$D;$j++) $b[]=(mt_rand()/mt_getrandmax())*2.0*M_PI;
+    $seed=crc32(json_encode(array_keys($baseIndex)));
     $scale=sqrt(2.0/$D);
-    $f=function(array $x) use($omega,$b,$scale,$D,$B){
+    $randMax=mt_getrandmax();
+    $f=function(array $x) use($seed,$gamma,$D,$B,$scale,$randMax){
       $z=array_fill(0,$D,0.0);
       for($j=0;$j<$D;$j++){
-        $dot=0.0; for($k=0;$k<$B;$k++) $dot+=$omega[$j][$k]*$x[$k];
-        $z[$j]=$scale*cos($dot+$b[$j]);
+        mt_srand($seed+$j, MT_RAND_MT19937);
+        $dot=0.0;
+        for($k=0;$k<$B;$k++){
+          $u1=max(mt_rand()/($randMax?:1),1e-12);
+          $u2=mt_rand()/($randMax?:1);
+          $n=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2); // ~N(0,1)
+          $dot+=sqrt(2.0*$gamma)*$n*$x[$k];
+        }
+        $b=(mt_rand()/($randMax?:1))*2.0*M_PI;
+        $z[$j]=$scale*cos($dot+$b);
       }
       return $z;
     };
     return [$f,['type'=>'rbf','D'=>$D,'gamma'=>$gamma,'seed'=>$seed],$D];
   }
 
-  // Sigmoid: random tanh features (approx)
+  // Sigmoid: random tanh features (generate bobot on-the-fly supaya tidak memakan RAM besar)
   if($kcfg['type']==='sigmoid'){
     $D=(int)$kcfg['D']; $scale=(float)$kcfg['scale']; $coef0=(float)$kcfg['coef0'];
-    $seed=14641 ^ crc32(json_encode(array_keys($baseIndex))); mt_srand($seed);
-    $W=[];
-    for($j=0;$j<$D;$j++){
-      $row=[];
-      for($k=0;$k<$B;$k++){
-        $u1=max(mt_rand()/mt_getrandmax(),1e-12);
-        $u2=mt_rand()/mt_getrandmax();
-        $z=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
-        $row[]=$scale*$z;
-      }
-      $W[]=$row;
-    }
-    $b=[]; for($j=0;$j<$D;$j++) $b[]=$coef0;
+    $seed=14641 ^ crc32(json_encode(array_keys($baseIndex)));
     $norm=sqrt(1.0/$D);
-    $f=function(array $x) use($W,$b,$D,$B,$norm){
+    $randMax=mt_getrandmax();
+    $f=function(array $x) use($seed,$scale,$coef0,$D,$B,$norm,$randMax){
       $z=array_fill(0,$D,0.0);
       for($j=0;$j<$D;$j++){
-        $dot=0.0; for($k=0;$k<$B;$k++) $dot+=$W[$j][$k]*$x[$k];
-        $z[$j]=$norm*tanh($dot+$b[$j]);
+        mt_srand($seed+$j, MT_RAND_MT19937);
+        $dot=0.0;
+        for($k=0;$k<$B;$k++){
+          $u1=max(mt_rand()/($randMax?:1),1e-12);
+          $u2=mt_rand()/($randMax?:1);
+          $n=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
+          $dot+=$scale*$n*$x[$k];
+        }
+        $z[$j]=$norm*tanh($dot+$coef0);
       }
       return $z;
     };
@@ -134,6 +149,7 @@ function buildFeatureMapper(array $baseIndex,array $kcfg): array{
   $f = function(array $x){ return $x; };
   return [$f, ['type'=>'sgd'], $B];
 }
+
 function log_and_exit_fail(?mysqli $db, int $userId, string $msg, ?string $modelPath=null): void{
   $status='failed'; $exec=0.0;
   if($db instanceof mysqli){
@@ -160,6 +176,7 @@ function log_and_exit_fail(?mysqli $db, int $userId, string $msg, ?string $model
   }
   exit(1);
 }
+
 function parseKvArgs(array $argv): array{
   $opts=[];
   foreach($argv as $arg){
@@ -194,6 +211,8 @@ $eta0   = isset($kv['eta0'])   ? max(1e-6, (float)$kv['eta0'])   : 0.1;
 $testRatio = isset($kv['test_ratio']) ? (float)$kv['test_ratio'] : $DEFAULT_TEST_RATIO;
 if($testRatio < 0.0) $testRatio = 0.0;
 if($testRatio > 0.9) $testRatio = 0.9;
+// batas jumlah sampel (default dari env)
+$maxSamples = isset($kv['max_samples']) ? max(1, (int)$kv['max_samples']) : $DEFAULT_MAX_SAMPLES;
 
 // table override + validasi nama tabel
 $tableOverride = $kv['table'] ?? null;
@@ -297,6 +316,7 @@ $biasIndex=$mappedDim; $dim=$mappedDim+1;
 ///////////////////////////// BUILD X, y ///////////////////////
 $res->data_seek(0);
 $X=[]; $y=[]; $total=0; $skipNoLabel=0; $skipZero=0;
+$truncated=false;
 while($row=$res->fetch_assoc()){
   $total++;
   $lab=$row[$goalKey]??null;
@@ -321,8 +341,12 @@ while($row=$res->fetch_assoc()){
   $z=$featureMapper($xBase); $xi=array_merge($z,[1.0]); // +bias
   $sum=0.0; foreach($xi as $vv) $sum+=abs($vv); if($sum==0.0){ $skipZero++; continue; }
   $X[]=$xi; $y[]=$yi;
+  if ($maxSamples > 0 && count($X) >= $maxSamples) { $truncated=true; break; }
 }
 if(!$X) log_and_exit_fail($db,$userId,"Tidak ada sampel valid. total={$total} kosong_label={$skipNoLabel} fitur_kosong={$skipZero}");
+if($truncated && $maxSamples > 0){
+  echo "NOTE: Dataset dibatasi {$maxSamples} sampel (set SVM_MAX_SAMPLES atau --max_samples untuk mengubah).\n";
+}
 
 ///////////////////////////// SPLIT TRAIN/TEST //////////////////////
 $totalSamples = count($X);
@@ -372,18 +396,8 @@ if(!$testIdx && $totalSamples>1){
 shuffle($trainIdx);
 shuffle($testIdx);
 
-$Xtrain = []; $ytrain = [];
-$Xtest  = []; $ytest  = [];
-foreach($trainIdx as $idx){
-  $Xtrain[] = $X[$idx];
-  $ytrain[] = $y[$idx];
-}
-foreach($testIdx as $idx){
-  $Xtest[] = $X[$idx];
-  $ytest[] = $y[$idx];
-}
-$nTrain = count($Xtrain);
-$nTest  = count($Xtest);
+$nTrain = count($trainIdx);
+$nTest  = count($testIdx);
 
 ///////////////////////////// TRAIN (SGD) //////////////////////
 // seed agar shuffle SGD reproducible
@@ -397,10 +411,12 @@ $n=$nTrain;
 $start=microtime(true); $t=0; $epochTimes=[];
 for($ep=0;$ep<$epochs;$ep++){
   $eStart=microtime(true);
-  $order=range(0,$n-1); shuffle($order);
-  foreach($order as $i){
+  $order=$trainIdx; shuffle($order);
+  foreach($order as $idx){
+    // Refresh batas waktu agar tidak terhenti di tengah epoch (jaga-jaga jika environment membatasi 30s)
+    @set_time_limit($MAX_EXEC_TIME);
     $t++; $eta=$eta0/(1.0+$lambda*$eta0*$t);
-    $xi=$Xtrain[$i]; $yi=$ytrain[$i]; $L=count($xi);
+    $xi=$X[$idx]; $yi=$y[$idx]; $L=count($xi);
     // one-vs-rest: update bobot untuk tiap kelas
     for($c=0;$c<$numClasses;$c++){
       $yc = ($c===$yi)?+1.0:-1.0;
@@ -421,8 +437,8 @@ $throughput=$n*$epochs/max($duration,1e-9);
 
 ///////////////////////////// TRAIN ACC ///////////////////////
 $correct=0;
-for($i=0;$i<$n;$i++){
-  $xi=$Xtrain[$i]; $yi=$ytrain[$i]; $L=count($xi);
+foreach($trainIdx as $idx){
+  $xi=$X[$idx]; $yi=$y[$idx]; $L=count($xi);
   $bestIdx=null; $bestScore=null;
   for($c=0;$c<$numClasses;$c++){
     $dot=0.0;
@@ -440,8 +456,8 @@ $acc = $trainAcc; // backward compatibility
 $testAcc = null;
 if($nTest>0){
   $correctTest = 0;
-  for($i=0;$i<$nTest;$i++){
-    $xi=$Xtest[$i]; $yi=$ytest[$i]; $L=count($xi);
+  foreach($testIdx as $idx){
+    $xi=$X[$idx]; $yi=$y[$idx]; $L=count($xi);
     $bestIdx=null; $bestScore=null;
     for($c=0;$c<$numClasses;$c++){
       $dot=0.0;
@@ -552,8 +568,8 @@ echo json_encode([
     'test_ratio'=>$testRatio
   ],
   'model_path'=>$modelPath,
-  'source_table'   => $sourceTable,   // <= tambahkan ini
-  'goal_column'    => $goalKey        // <= dan ini
+  'source_table'   => $sourceTable,
+  'goal_column'    => $goalKey
 ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) . PHP_EOL;
 
 $db->close();
