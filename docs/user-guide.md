@@ -93,8 +93,8 @@ Untuk atribut kategorikal, definisikan nilai yang valid:
 
 ### Memilih Kernel
 - `sgd`: baseline cepat untuk data yang relatif linear.
-- `rbf:D=1024:gamma=0.25`: untuk pola non-linear; ubah `D` atau `gamma` jika perlu.
-- `sigmoid:D=1024:scale=1.0:coef0=0.0`: untuk pola dengan batas keputusan sigmoid-like.
+- `rbf:D=128:gamma=0.25`: untuk pola non-linear; ubah `D` atau `gamma` jika perlu.
+- `sigmoid:D=128:scale=1.0:coef0=0.0`: untuk pola dengan batas keputusan sigmoid-like.
 
 ### Training via Web
 1. Buka **Support Vector Machine**.
@@ -115,7 +115,7 @@ Training berhasil
 ```bash
 php scripts/decision-tree/SVM.php <user_id> <case_num> [kernel] [options]
 # Contoh:
-php scripts/decision-tree/SVM.php 1 1 rbf:D=1024:gamma=0.5 --epochs=50 --lambda=0.0001
+php scripts/decision-tree/SVM.php 1 1 rbf:D=128:gamma=0.5 --epochs=50 --lambda=0.0001
 ```
 
 Opsi umum:

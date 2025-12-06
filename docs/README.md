@@ -152,14 +152,14 @@ Pastikan direktori tersebut writable oleh PHP.
 
 3. Training model (web)
    - Masuk ke Support Vector Machine
-   - Pilih kernel: `sgd`, `rbf:D=1024:gamma=0.25`, atau `sigmoid:D=1024:scale=1.0:coef0=0.0`
+   - Pilih kernel: `sgd`, `rbf:D=128:gamma=0.25`, atau `sigmoid:D=128:scale=1.0:coef0=0.0`
    - Klik *Train Model* dan pantau hasil
 
 4. Training model (CLI)
    ```bash
    php scripts/decision-tree/SVM.php <user_id> <case_num> [kernel] [options]
    # Contoh:
-   php scripts/decision-tree/SVM.php 1 1 rbf:D=1024:gamma=0.5 --epochs=50 --lambda=0.0001
+   php scripts/decision-tree/SVM.php 1 1 rbf:D=128:gamma=0.5 --epochs=50 --lambda=0.0001
    ```
 
 5. Prediksi
