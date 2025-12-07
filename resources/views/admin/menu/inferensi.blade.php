@@ -84,7 +84,7 @@
                 ? str_pad($rid, 20, '0', STR_PAD_LEFT)
                 : 'Z' . $rid;
 
-            // format string biar sort leksikografis ≈ numerik
+            // format string biar sort leksikografis vs numerik
             return sprintf('%013d-%02d-%s', $ts, (int)($r->_algo_rank ?? 9), $ridKey);
         })
         ->values();
@@ -111,6 +111,17 @@
     $cFC    = $rows2->count();
     $cBC    = $rows3->count();
     $cAll   = $all->count();
+
+    // Pagination (client-side on the merged collection)
+    $perPage = 10;
+    $page    = max((int) request()->input('page', 1), 1);
+    $paged   = new \Illuminate\Pagination\LengthAwarePaginator(
+        $all->slice(($page - 1) * $perPage, $perPage),
+        $all->count(),
+        $perPage,
+        $page,
+        ['path' => request()->url(), 'query' => request()->query()]
+    );
 
     // Util: buang prefix angka_ (e.g., "202_Olahraga" -> "Olahraga")
     $stripNumPrefix = function(string $s){
@@ -142,7 +153,7 @@
     };
 @endphp
 
-<h1 class="mt-4">Inferensi — {{ $user->username }}</h1>
+<h1 class="mt-4">Inferensi - {{ $user->username }}</h1>
 
 {{-- Alert hasil aksi --}}
 @if(session('success'))
@@ -171,7 +182,7 @@
 </div>
 
 {{-- Tombol kecil utilitas --}}
-<div class="mb-3 d-flex gap-2">
+<div class="mb-3 d-flex flex-wrap gap-2">
   <a href="{{ url()->current() }}" class="btn btn-sm btn-outline-secondary">Refresh</a>
   <a href="{{ route('test.case.form') }}" class="btn btn-sm btn-outline-primary">Lihat Test Case</a>
 </div>
@@ -197,7 +208,7 @@
           </tr>
         </thead>
         <tbody>
-          @foreach ($all as $row)
+          @foreach ($paged as $row)
             @php
                 // Id tampil unik dengan prefix MR-/SVM-/FC-/BC-
                 $dispId = $row->_disp_id ?? '-';
@@ -240,7 +251,10 @@
         </tbody>
       </table>
     </div>
-  </div>
-@endif
+ +    <div class="mt-3">                                                                                                                              
+      {{ $paged->onEachSide(1)->links('pagination::bootstrap-5') }}                                                                                 
+    </div>                                                                                                                                          
+  </div>                                                                                                                                            
+@endif  
 
 @endsection

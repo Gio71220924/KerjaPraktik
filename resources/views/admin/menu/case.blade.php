@@ -29,22 +29,24 @@
     <a href="{{ route('admin.menu.case.edit') }}" class="btn btn-primary mb-3">Edit Project</a>
     
     @if ($kasus)
-    <div class="card-body">
-        <table class="table table-bordered">
-            <tr>
-                <th>Username</th>
-                <td>{{ $user->username }}</td>
-            </tr>
-            <tr>
-                <th>Project Name</th>
-                <td>{{ $kasus->case_title }}</td>
-            </tr>
-            <tr>
-                <th>Project Description</th>
-                <td>{{ $kasus->case_desc }}</td>
-            </tr>
-        </table>
-    </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered mb-0">
+                    <tr>
+                        <th>Username</th>
+                        <td>{{ $user->username }}</td>
+                    </tr>
+                    <tr>
+                        <th>Project Name</th>
+                        <td>{{ $kasus->case_title }}</td>
+                    </tr>
+                    <tr>
+                        <th>Project Description</th>
+                        <td>{{ $kasus->case_desc }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
     @else
     <ol class="breadcrumb mb-4">
         <li class="breadcrumb-item active">There is no case for this user.</li>
