@@ -395,7 +395,9 @@ class ConsultationController extends Controller
         $dirs = SvmModelLocator::directories();
         $fallbackDir = $dirs[0] ?? (function_exists('base_path') ? base_path('svm_models') : getcwd());
 
-        return rtrim($fallbackDir, '/\\') . DIRECTORY_SEPARATOR . $fileName;
+        // Normalize to the platform directory separator to avoid mixed "/" and "\" in output.
+        $base = rtrim($fallbackDir, '/\\');
+        return $base . DIRECTORY_SEPARATOR . $fileName;
     }
 
     private function resolvePhpBinary(): string

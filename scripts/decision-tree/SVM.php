@@ -479,7 +479,8 @@ if($SAVE_MODEL){
   if(!is_dir($storageDir) && !@mkdir($storageDir,0755,true) && !is_dir($storageDir)){
     log_and_exit_fail($db,$userId,"Gagal membuat direktori model: {$storageDir}");
   }
-  $modelPath = rtrim($storageDir,'/\\') . "/svm_user_{$userId}_{$kcfg['type']}.json";
+  // Normalized path so logs tidak campur \\ dan /
+  $modelPath = rtrim($storageDir, '/\\') . DIRECTORY_SEPARATOR . "svm_user_{$userId}_{$kcfg['type']}.json";
   $model = [
     'type'=>'svm_sgd',
     'dim'=>$dim,
