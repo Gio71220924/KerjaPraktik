@@ -100,13 +100,18 @@ class SVMController extends Controller
         $kernel = (string)$request->input('kernel', 'sgd');
         $table  = "case_user_{$userId}";
 
+        // Ambil hasil train + meta (confusion matrix, samples, dll.)
         $train = $this->runTraining($userId, $userId, $kernel, false, $table);
 
         if ($train['error'] ?? false) {
             return back()->with('svm_err', "Training gagal:\n" . ($train['message'] ?? ''));
         }
 
-        return back()->with('svm_ok', trim($train['stdout'] ?? 'Training selesai.'));
+        $meta = $train['json'] ?? [];
+
+        return back()
+            ->with('svm_ok', trim($train['stdout'] ?? 'Training selesai.'))
+            ->with('svm_meta', $meta);
     }
 
     /**
@@ -203,6 +208,10 @@ class SVMController extends Controller
             'goal_key'   => $pred['goal_key'],
             'top'        => $pred['top'] ?? [],
         ];
+        // sertakan confusion matrix hasil train supaya bisa divisualisasikan
+        if (isset($train['json']['confusion'])) {
+            $meta['confusion'] = $train['json']['confusion'];
+        }
 
         return back()
             ->with('svm_ok', $ok)
