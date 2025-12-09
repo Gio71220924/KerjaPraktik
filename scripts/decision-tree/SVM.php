@@ -187,6 +187,35 @@ function parseKvArgs(array $argv): array{
   return $opts;
 }
 
+/** Buat confusion matrix kosong (K x K) */
+function emptyConfusion(int $numClasses): array{
+  $m=[];
+  for($i=0;$i<$numClasses;$i++){
+    $m[] = array_fill(0,$numClasses,0);
+  }
+  return $m;
+}
+
+/** Pretty-print confusion matrix ke teks sederhana */
+function formatConfusion(array $cm, array $labels): string{
+  $n=count($labels);
+  if($n===0) return '';
+  $width=7;
+  foreach($labels as $lbl){ $width=max($width, strlen((string)$lbl)+2); }
+  foreach($cm as $row){ foreach($row as $v){ $width=max($width, strlen((string)$v)+2); } }
+  $pad = $width;
+  $lines=[];
+  $header=str_pad('actual\\pred', $pad);
+  foreach($labels as $lbl){ $header .= str_pad((string)$lbl, $pad, ' ', STR_PAD_BOTH); }
+  $lines[]=$header;
+  foreach($cm as $i=>$row){
+    $line=str_pad((string)($labels[$i] ?? $i), $pad);
+    foreach($row as $v){ $line .= str_pad((string)$v, $pad, ' ', STR_PAD_BOTH); }
+    $lines[]=$line;
+  }
+  return implode(PHP_EOL, $lines);
+}
+
 ///////////////////////////// ARGS //////////////////////////////
 if(PHP_SAPI!=='cli'){
   if(defined('STDERR')) fwrite(STDERR,"Run from CLI.\n"); else echo "Run from CLI.\n";
@@ -436,6 +465,7 @@ $avgEpoch=array_sum($epochTimes)/max(count($epochTimes),1);
 $throughput=$n*$epochs/max($duration,1e-9);
 
 ///////////////////////////// TRAIN ACC ///////////////////////
+$confTrain = emptyConfusion($numClasses);
 $correct=0;
 foreach($trainIdx as $idx){
   $xi=$X[$idx]; $yi=$y[$idx]; $L=count($xi);
@@ -447,12 +477,14 @@ foreach($trainIdx as $idx){
       $bestScore=$dot; $bestIdx=$c;
     }
   }
+  $confTrain[$yi][$bestIdx]++;  // actual=yi, pred=bestIdx
   if($bestIdx===$yi) $correct++;
 }
 $trainAcc = $n>0 ? $correct/$n : 0.0;
 $acc = $trainAcc; // backward compatibility
 
 ///////////////////////////// TEST ACC /////////////////////////
+$confTest = $nTest>0 ? emptyConfusion($numClasses) : null;
 $testAcc = null;
 if($nTest>0){
   $correctTest = 0;
@@ -466,6 +498,7 @@ if($nTest>0){
         $bestScore=$dot; $bestIdx=$c;
       }
     }
+    if($confTest!==null) $confTest[$yi][$bestIdx]++; // actual=yi, pred=bestIdx
     if($bestIdx===$yi) $correctTest++;
   }
   $testAcc = $correctTest/$nTest;
@@ -523,13 +556,18 @@ $db->query("CREATE TABLE IF NOT EXISTS `{$logTable}`(
 
 $status='success';
 $classesStr = implode('|', $classLabels);
+$cmTrainText = formatConfusion($confTrain, $classLabels);
+$cmTestText  = $confTest ? formatConfusion($confTest, $classLabels) : null;
+$cmTrainJson = json_encode($confTrain, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+$cmTestJson  = $confTest ? json_encode($confTest, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) : null;
 $output="SVM {$kcfg['type']}. source={$sourceTable}; goal={$goalKey}; classes={$classesStr}; ".
         "samples_total={$totalSamples}; train={$nTrain}; test={$nTest}; ".
         "acc_train=".number_format($trainAcc*100,2)."%; ".
         "acc_test=".($testAcc!==null?number_format($testAcc*100,2):'NA')."%; ".
         "threshold={$DECISION_THRESHOLD}; ".
         "Execution time=".number_format($duration,4)."s; epoch_avg=".number_format($avgEpoch,4)."s; ".
-        "throughput=".number_format($throughput,1)." samples/s";
+        "throughput=".number_format($throughput,1)." samples/s; ".
+        "cm_train={$cmTrainJson}; cm_test=".($cmTestJson ?? 'null');
 $stmt=$db->prepare("INSERT INTO `{$logTable}`(status,execution_time,model_path,output,created_at,updated_at)
                     VALUES (?,?,?,?,NOW(),NOW())");
 $stmt->bind_param('sdss',$status,$duration,$modelPath,$output);
@@ -544,6 +582,8 @@ echo "⏱️ Total: ".number_format($duration,6)." s | Avg/epoch: ".number_forma
      " s | Throughput: ".number_format($throughput,1)." samples/s\n";
 echo "🎯 Kelas: +1={$posLabel}, -1={$negLabel}\n";
 if($modelPath) echo "📦 Model: {$modelPath}\n";
+if($cmTrainText) echo "Confusion matrix (train):\n{$cmTrainText}\n";
+if($cmTestText)  echo "Confusion matrix (test):\n{$cmTestText}\n";
 
 echo json_encode([
   'status'=>'success',
@@ -570,7 +610,12 @@ echo json_encode([
   ],
   'model_path'=>$modelPath,
   'source_table'   => $sourceTable,
-  'goal_column'    => $goalKey
+  'goal_column'    => $goalKey,
+  'confusion'      => [
+    'labels' => $classLabels,
+    'train'  => $confTrain,
+    'test'   => $confTest
+  ]
 ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) . PHP_EOL;
 
 $db->close();
