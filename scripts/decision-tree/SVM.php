@@ -242,6 +242,10 @@ if($testRatio < 0.0) $testRatio = 0.0;
 if($testRatio > 0.9) $testRatio = 0.9;
 // batas jumlah sampel (default dari env)
 $maxSamples = isset($kv['max_samples']) ? max(1, (int)$kv['max_samples']) : $DEFAULT_MAX_SAMPLES;
+// oversample kelas minoritas pada train (0=off, 1.0=samakan dengan mayoritas)
+$oversampleMinor = isset($kv['oversample_minor']) ? max(0.0, (float)$kv['oversample_minor']) : (float)envv('SVM_OVERSAMPLE_MINOR','0');
+// class weight: 'auto' untuk 1/freq per kelas, else none
+$classWeightMode = isset($kv['class_weight']) ? strtolower((string)$kv['class_weight']) : strtolower((string)envv('SVM_CLASS_WEIGHT','none'));
 
 // table override + validasi nama tabel
 $tableOverride = $kv['table'] ?? null;
@@ -428,6 +432,50 @@ shuffle($testIdx);
 $nTrain = count($trainIdx);
 $nTest  = count($testIdx);
 
+///////////////////////////// CLASS COUNTS & WEIGHTS ///////////
+// hitung frekuensi train (sebelum oversample)
+$trainCounts = array_fill(0, $numClasses, 0);
+foreach($trainIdx as $idx){ $trainCounts[$y[$idx]]++; }
+
+// class weight (auto => 1/freq, dinormalisasi agar rata-rata=1)
+$classWeights = array_fill(0, $numClasses, 1.0);
+if($classWeightMode === 'auto'){
+  $totalTrain = array_sum($trainCounts);
+  $avg = $numClasses>0 ? ($totalTrain / max($numClasses,1)) : 0;
+  if($avg>0){
+    foreach($trainCounts as $c=>$cnt){
+      $classWeights[$c] = $cnt>0 ? ($avg / $cnt) : 1.0;
+    }
+  }
+}
+
+///////////////////////////// OVERSAMPLE MINORITY (TRAIN ONLY) //
+if($oversampleMinor > 0 && $nTrain > 0){
+  // bucketkan train per kelas
+  $bucketTrain=[];
+  foreach($trainIdx as $idx){
+    $cls=$y[$idx];
+    if(!isset($bucketTrain[$cls])) $bucketTrain[$cls]=[];
+    $bucketTrain[$cls][]=$idx;
+  }
+  $maxCount = max($trainCounts);
+  $target   = (int)ceil($maxCount * $oversampleMinor);
+  if($target > 0){
+    foreach($bucketTrain as $cls=>$list){
+      $cnt=count($list);
+      if($cnt===0 || $cnt >= $target) continue;
+      // sampling dengan pengulangan sampai mencapai target
+      for($k=$cnt; $k<$target; $k++){
+        $pick=$list[$k % $cnt]; // deterministic cycle
+        $trainIdx[]=$pick;
+        $trainCounts[$cls]++; // update count setelah oversample
+      }
+    }
+    shuffle($trainIdx);
+    $nTrain = count($trainIdx);
+  }
+}
+
 ///////////////////////////// TRAIN (SGD) //////////////////////
 // seed agar shuffle SGD reproducible
 mt_srand(42);
@@ -446,13 +494,14 @@ for($ep=0;$ep<$epochs;$ep++){
     @set_time_limit($MAX_EXEC_TIME);
     $t++; $eta=$eta0/(1.0+$lambda*$eta0*$t);
     $xi=$X[$idx]; $yi=$y[$idx]; $L=count($xi);
+    $wSample = $classWeights[$yi] ?? 1.0; // bobot kelas (auto jika diaktifkan)
     // one-vs-rest: update bobot untuk tiap kelas
     for($c=0;$c<$numClasses;$c++){
       $yc = ($c===$yi)?+1.0:-1.0;
       $dot=0.0;
       for($k=0;$k<$L;$k++) $dot+=$W[$c][$k]*$xi[$k];
       if($yc*$dot<1.0){
-        for($k=0;$k<$L;$k++) $W[$c][$k]-=$eta*($lambda*$W[$c][$k]-$yc*$xi[$k]);
+        for($k=0;$k<$L;$k++) $W[$c][$k]-=$eta*($lambda*$W[$c][$k]-$wSample*$yc*$xi[$k]);
       }else{
         for($k=0;$k<$L;$k++) $W[$c][$k]-=$eta*($lambda*$W[$c][$k]);
       }
@@ -560,6 +609,7 @@ $cmTrainText = formatConfusion($confTrain, $classLabels);
 $cmTestText  = $confTest ? formatConfusion($confTest, $classLabels) : null;
 $cmTrainJson = json_encode($confTrain, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
 $cmTestJson  = $confTest ? json_encode($confTest, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) : null;
+$cwModeStr   = $classWeightMode==='auto' ? 'auto' : 'none';
 $output="SVM {$kcfg['type']}. source={$sourceTable}; goal={$goalKey}; classes={$classesStr}; ".
         "samples_total={$totalSamples}; train={$nTrain}; test={$nTest}; ".
         "acc_train=".number_format($trainAcc*100,2)."%; ".
@@ -567,6 +617,7 @@ $output="SVM {$kcfg['type']}. source={$sourceTable}; goal={$goalKey}; classes={$
         "threshold={$DECISION_THRESHOLD}; ".
         "Execution time=".number_format($duration,4)."s; epoch_avg=".number_format($avgEpoch,4)."s; ".
         "throughput=".number_format($throughput,1)." samples/s; ".
+        "oversample_minor={$oversampleMinor}; class_weight={$cwModeStr}; ".
         "cm_train={$cmTrainJson}; cm_test=".($cmTestJson ?? 'null');
 $stmt=$db->prepare("INSERT INTO `{$logTable}`(status,execution_time,model_path,output,created_at,updated_at)
                     VALUES (?,?,?,?,NOW(),NOW())");
@@ -606,7 +657,9 @@ echo json_encode([
     'epochs'=>$epochs,
     'lambda'=>$lambda,
     'eta0'=>$eta0,
-    'test_ratio'=>$testRatio
+    'test_ratio'=>$testRatio,
+    'oversample_minor'=>$oversampleMinor,
+    'class_weight'=>$cwModeStr
   ],
   'model_path'=>$modelPath,
   'source_table'   => $sourceTable,
