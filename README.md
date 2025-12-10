@@ -168,4 +168,4 @@ KerjaPraktik/
     └── Feature/                  # Feature tests
 ```
 
-**Made by**: 71220924-Giovanka S.H.P.
+**Made by**: 71220924-Giovanka.S.H.P.
