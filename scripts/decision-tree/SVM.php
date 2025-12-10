@@ -4,8 +4,8 @@ declare(strict_types=1);
 /**
  * SVM SGD (hinge + L2) dengan opsi kernel via feature map:
  *  - sgd (linear/identitas)
- *  - rbf:D=1024:gamma=0.25 (Random Fourier Features)
- *  - sigmoid:D=1024:scale=1.0:coef0=0.0 (random tanh features; aproksimasi praktis)
+ *  - rbf:D=256:gamma=0.25 (Random Fourier Features)
+ *  - sigmoid:D=256:scale=1.0:coef0=0.0 (random tanh features; aproksimasi praktis)
  *
  * Fitur:
  *  - Execution time: total, avg/epoch, throughput
@@ -24,8 +24,22 @@ function envv(string $k, $d=null){
   return $d;
 }
 
-$SAVE_MODEL         = filter_var(envv('SVM_SAVE_MODEL','1'), FILTER_VALIDATE_BOOLEAN);
-$MODEL_DIR_FALLBACK = getcwd() . DIRECTORY_SEPARATOR . 'svm_models';
+$SAVE_MODEL          = filter_var(envv('SVM_SAVE_MODEL','1'), FILTER_VALIDATE_BOOLEAN);
+$MAX_EXEC_TIME_RAW   = envv('SVM_MAX_EXEC_TIME', '0');    // 0 = unlimited, atau isi detik
+$MAX_EXEC_TIME       = is_numeric($MAX_EXEC_TIME_RAW) ? (int)$MAX_EXEC_TIME_RAW : 0;
+$MEMORY_LIMIT        = envv('SVM_MEMORY_LIMIT', '-1'); // -1 = unlimited by default; override via env/ini jika ingin membatasi
+// Batas jumlah sampel (agar tidak makan RAM berlebihan)
+$DEFAULT_MAX_SAMPLES = (int)envv('SVM_MAX_SAMPLES', '0'); // 0 = unlimited secara default
+// Paksa hilangkan batas waktu proses CLI; refresh nilai di awal
+@ini_set('max_execution_time', (string)$MAX_EXEC_TIME);
+@set_time_limit($MAX_EXEC_TIME);
+if ($MEMORY_LIMIT) {
+  @ini_set('memory_limit', (string)$MEMORY_LIMIT);
+}
+$MODEL_DIR_FALLBACK  = getcwd() . DIRECTORY_SEPARATOR . 'svm_models';
+// Default proporsi data uji dan threshold keputusan (bisa dioverride via ENV / CLI)
+$DEFAULT_TEST_RATIO  = (float)envv('SVM_TEST_RATIO','0.3');   // 30% untuk uji (70/30)
+$DECISION_THRESHOLD  = (float)envv('SVM_THRESHOLD','0.0');    // dot >= threshold => kelas +1
 
 ///////////////////////////// HELPERS /////////////////////////////////
 function norm(string $s): string{
@@ -46,6 +60,7 @@ function table_exists(mysqli $db,string $schema,string $table):bool{
   $q=$db->query("SELECT 1 FROM information_schema.tables WHERE table_schema='{$schema}' AND table_name='{$table}' LIMIT 1");
   return $q && $q->num_rows>0;
 }
+
 /** Kernel parser: 'sgd' | 'rbf[:D=...][:gamma=...]' | 'sigmoid[:D=...][:scale=...][:coef0=...]' */
 function parseKernel(string $spec): array{
   $parts=explode(':', strtolower(trim($spec)));
@@ -57,10 +72,20 @@ function parseKernel(string $spec): array{
       $cfg[$k]=is_numeric($v)?(float)$v:$v;
     }
   }
-  if($type==='rbf'){ $cfg['D']=(int)($cfg['D']??1024); $cfg['gamma']=(float)($cfg['gamma']??0.25); }
-  if($type==='sigmoid'){ $cfg['D']=(int)($cfg['D']??1024); $cfg['scale']=(float)($cfg['scale']??1.0); $cfg['coef0']=(float)($cfg['coef0']??0.0); }
+  if($type==='rbf'){
+    // default D dari 1024 -> 128 (lebih ringan)
+    $cfg['D']     = (int)($cfg['D'] ?? 128);
+    $cfg['gamma'] = (float)($cfg['gamma'] ?? 0.25);
+  }
+  if($type==='sigmoid'){
+    // default D dari 1024 -> 128 (lebih ringan)
+    $cfg['D']     = (int)($cfg['D'] ?? 128);
+    $cfg['scale'] = (float)($cfg['scale'] ?? 1.0);
+    $cfg['coef0'] = (float)($cfg['coef0'] ?? 0.0);
+  }
   return $cfg;
 }
+
 /** Build mapper: return [callable $mapFn, array $meta, int $outDim] */
 function buildFeatureMapper(array $baseIndex,array $kcfg): array{
   $B=count($baseIndex);
@@ -71,56 +96,49 @@ function buildFeatureMapper(array $baseIndex,array $kcfg): array{
     return [$f, ['type'=>'sgd'], $B];
   }
 
-  // RBF: Random Fourier Features
+  // RBF: Random Fourier Features (generate bobot on-the-fly supaya tidak memakan RAM besar)
   if($kcfg['type']==='rbf'){
     $D=(int)$kcfg['D']; $gamma=(float)$kcfg['gamma'];
-    $seed=crc32(json_encode(array_keys($baseIndex))); mt_srand($seed);
-    $omega=[];
-    for($j=0;$j<$D;$j++){
-      $row=[];
-      for($k=0;$k<$B;$k++){
-        $u1=max(mt_rand()/mt_getrandmax(),1e-12);
-        $u2=mt_rand()/mt_getrandmax();
-        $z=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2); // ~N(0,1)
-        $row[]=sqrt(2.0*$gamma)*$z;
-      }
-      $omega[]=$row;
-    }
-    $b=[]; for($j=0;$j<$D;$j++) $b[]=(mt_rand()/mt_getrandmax())*2.0*M_PI;
+    $seed=crc32(json_encode(array_keys($baseIndex)));
     $scale=sqrt(2.0/$D);
-    $f=function(array $x) use($omega,$b,$scale,$D,$B){
+    $randMax=mt_getrandmax();
+    $f=function(array $x) use($seed,$gamma,$D,$B,$scale,$randMax){
       $z=array_fill(0,$D,0.0);
       for($j=0;$j<$D;$j++){
-        $dot=0.0; for($k=0;$k<$B;$k++) $dot+=$omega[$j][$k]*$x[$k];
-        $z[$j]=$scale*cos($dot+$b[$j]);
+        mt_srand($seed+$j, MT_RAND_MT19937);
+        $dot=0.0;
+        for($k=0;$k<$B;$k++){
+          $u1=max(mt_rand()/($randMax?:1),1e-12);
+          $u2=mt_rand()/($randMax?:1);
+          $n=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2); // ~N(0,1)
+          $dot+=sqrt(2.0*$gamma)*$n*$x[$k];
+        }
+        $b=(mt_rand()/($randMax?:1))*2.0*M_PI;
+        $z[$j]=$scale*cos($dot+$b);
       }
       return $z;
     };
     return [$f,['type'=>'rbf','D'=>$D,'gamma'=>$gamma,'seed'=>$seed],$D];
   }
 
-  // Sigmoid: random tanh features (approx)
+  // Sigmoid: random tanh features (generate bobot on-the-fly supaya tidak memakan RAM besar)
   if($kcfg['type']==='sigmoid'){
     $D=(int)$kcfg['D']; $scale=(float)$kcfg['scale']; $coef0=(float)$kcfg['coef0'];
-    $seed=14641 ^ crc32(json_encode(array_keys($baseIndex))); mt_srand($seed);
-    $W=[];
-    for($j=0;$j<$D;$j++){
-      $row=[];
-      for($k=0;$k<$B;$k++){
-        $u1=max(mt_rand()/mt_getrandmax(),1e-12);
-        $u2=mt_rand()/mt_getrandmax();
-        $z=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
-        $row[]=$scale*$z;
-      }
-      $W[]=$row;
-    }
-    $b=[]; for($j=0;$j<$D;$j++) $b[]=$coef0;
+    $seed=14641 ^ crc32(json_encode(array_keys($baseIndex)));
     $norm=sqrt(1.0/$D);
-    $f=function(array $x) use($W,$b,$D,$B,$norm){
+    $randMax=mt_getrandmax();
+    $f=function(array $x) use($seed,$scale,$coef0,$D,$B,$norm,$randMax){
       $z=array_fill(0,$D,0.0);
       for($j=0;$j<$D;$j++){
-        $dot=0.0; for($k=0;$k<$B;$k++) $dot+=$W[$j][$k]*$x[$k];
-        $z[$j]=$norm*tanh($dot+$b[$j]);
+        mt_srand($seed+$j, MT_RAND_MT19937);
+        $dot=0.0;
+        for($k=0;$k<$B;$k++){
+          $u1=max(mt_rand()/($randMax?:1),1e-12);
+          $u2=mt_rand()/($randMax?:1);
+          $n=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
+          $dot+=$scale*$n*$x[$k];
+        }
+        $z[$j]=$norm*tanh($dot+$coef0);
       }
       return $z;
     };
@@ -131,6 +149,7 @@ function buildFeatureMapper(array $baseIndex,array $kcfg): array{
   $f = function(array $x){ return $x; };
   return [$f, ['type'=>'sgd'], $B];
 }
+
 function log_and_exit_fail(?mysqli $db, int $userId, string $msg, ?string $modelPath=null): void{
   $status='failed'; $exec=0.0;
   if($db instanceof mysqli){
@@ -157,6 +176,7 @@ function log_and_exit_fail(?mysqli $db, int $userId, string $msg, ?string $model
   }
   exit(1);
 }
+
 function parseKvArgs(array $argv): array{
   $opts=[];
   foreach($argv as $arg){
@@ -165,6 +185,35 @@ function parseKvArgs(array $argv): array{
     }
   }
   return $opts;
+}
+
+/** Buat confusion matrix kosong (K x K) */
+function emptyConfusion(int $numClasses): array{
+  $m=[];
+  for($i=0;$i<$numClasses;$i++){
+    $m[] = array_fill(0,$numClasses,0);
+  }
+  return $m;
+}
+
+/** Pretty-print confusion matrix ke teks sederhana */
+function formatConfusion(array $cm, array $labels): string{
+  $n=count($labels);
+  if($n===0) return '';
+  $width=7;
+  foreach($labels as $lbl){ $width=max($width, strlen((string)$lbl)+2); }
+  foreach($cm as $row){ foreach($row as $v){ $width=max($width, strlen((string)$v)+2); } }
+  $pad = $width;
+  $lines=[];
+  $header=str_pad('actual\\pred', $pad);
+  foreach($labels as $lbl){ $header .= str_pad((string)$lbl, $pad, ' ', STR_PAD_BOTH); }
+  $lines[]=$header;
+  foreach($cm as $i=>$row){
+    $line=str_pad((string)($labels[$i] ?? $i), $pad);
+    foreach($row as $v){ $line .= str_pad((string)$v, $pad, ' ', STR_PAD_BOTH); }
+    $lines[]=$line;
+  }
+  return implode(PHP_EOL, $lines);
 }
 
 ///////////////////////////// ARGS //////////////////////////////
@@ -187,6 +236,16 @@ $kv         = parseKvArgs($argv);
 $epochs = isset($kv['epochs']) ? max(1, (int)$kv['epochs']) : 20;
 $lambda = isset($kv['lambda']) ? max(1e-8, (float)$kv['lambda']) : 1e-4;
 $eta0   = isset($kv['eta0'])   ? max(1e-6, (float)$kv['eta0'])   : 0.1;
+// proporsi data uji (0..0.9)
+$testRatio = isset($kv['test_ratio']) ? (float)$kv['test_ratio'] : $DEFAULT_TEST_RATIO;
+if($testRatio < 0.0) $testRatio = 0.0;
+if($testRatio > 0.9) $testRatio = 0.9;
+// batas jumlah sampel (default dari env)
+$maxSamples = isset($kv['max_samples']) ? max(1, (int)$kv['max_samples']) : $DEFAULT_MAX_SAMPLES;
+// oversample kelas minoritas pada train (0=off, 1.0=samakan dengan mayoritas)
+$oversampleMinor = isset($kv['oversample_minor']) ? max(0.0, (float)$kv['oversample_minor']) : (float)envv('SVM_OVERSAMPLE_MINOR','0');
+// class weight: 'auto' untuk 1/freq per kelas, else none
+$classWeightMode = isset($kv['class_weight']) ? strtolower((string)$kv['class_weight']) : strtolower((string)envv('SVM_CLASS_WEIGHT','none'));
 
 // table override + validasi nama tabel
 $tableOverride = $kv['table'] ?? null;
@@ -265,8 +324,16 @@ if(count($classes)<2){
   $detail=json_encode($freq, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
   log_and_exit_fail($db,$userId,"Butuh >=2 kelas untuk SVM. Distribusi label: {$detail}");
 }
-$posLabel=$classes[0];
-$negLabel=$classes[1];
+// Multi-class: gunakan semua kelas yang ada (>=2)
+$classLabels = array_values($classes);       // daftar label unik (string)
+$numClasses  = count($classLabels);
+// Untuk kompatibilitas lama (binary), tetap definisikan pos/neg dari dua kelas pertama
+$posLabel = $classLabels[0];
+$negLabel = $classLabels[1] ?? $classLabels[0];
+$labelToIndex = [];
+foreach ($classLabels as $idx => $lab) {
+  $labelToIndex[(string)$lab] = $idx;       // map label -> index 0..K-1
+}
 
 ///////////////////////////// INDEX FITUR DASAR ///////////////
 $baseIndex=[]; $bi=0;
@@ -282,12 +349,14 @@ $biasIndex=$mappedDim; $dim=$mappedDim+1;
 ///////////////////////////// BUILD X, y ///////////////////////
 $res->data_seek(0);
 $X=[]; $y=[]; $total=0; $skipNoLabel=0; $skipZero=0;
+$truncated=false;
 while($row=$res->fetch_assoc()){
   $total++;
   $lab=$row[$goalKey]??null;
   if($lab===null||$lab===''||preg_match('/^(unknown|tidak diketahui)$/i',(string)$lab)){ $skipNoLabel++; continue; }
-  $lab=(string)$lab; if($lab!==$posLabel&&$lab!==$negLabel) continue;
-  $yi=($lab===$posLabel)?+1:-1;
+  $lab=(string)$lab;
+  if(!isset($labelToIndex[$lab])) continue; // jaga-jaga
+  $yi = $labelToIndex[$lab];                // kelas 0..K-1
 
   $xBase=array_fill(0,$B,0.0);
   foreach($row as $c=>$v){
@@ -305,26 +374,137 @@ while($row=$res->fetch_assoc()){
   $z=$featureMapper($xBase); $xi=array_merge($z,[1.0]); // +bias
   $sum=0.0; foreach($xi as $vv) $sum+=abs($vv); if($sum==0.0){ $skipZero++; continue; }
   $X[]=$xi; $y[]=$yi;
+  if ($maxSamples > 0 && count($X) >= $maxSamples) { $truncated=true; break; }
 }
 if(!$X) log_and_exit_fail($db,$userId,"Tidak ada sampel valid. total={$total} kosong_label={$skipNoLabel} fitur_kosong={$skipZero}");
+if($truncated && $maxSamples > 0){
+  echo "NOTE: Dataset dibatasi {$maxSamples} sampel (set SVM_MAX_SAMPLES atau --max_samples untuk mengubah).\n";
+}
+
+///////////////////////////// SPLIT TRAIN/TEST //////////////////////
+$totalSamples = count($X);
+
+// Stratified random split per kelas supaya 70/30 tidak sekuensial
+$splitSeedEnv = envv('SVM_SPLIT_SEED', null);
+if($splitSeedEnv !== null && $splitSeedEnv!==''){
+  mt_srand((int)$splitSeedEnv);
+}else{
+  $autoSeed = (int)(microtime(true) * 1000000);
+  try{ $autoSeed ^= random_int(PHP_INT_MIN, PHP_INT_MAX); }catch(Throwable $e){}
+  mt_srand($autoSeed);
+}
+
+$buckets = [];
+foreach($y as $idx=>$clsIdx){
+  if(!isset($buckets[$clsIdx])) $buckets[$clsIdx]=[];
+  $buckets[$clsIdx][]=$idx;
+}
+
+$trainIdx=[]; $testIdx=[];
+foreach($buckets as $clsIdx=>$idxList){
+  shuffle($idxList);
+  $nCls=count($idxList);
+  $tCount=(int)round($testRatio*$nCls);
+  if($tCount >= $nCls && $nCls>1) $tCount=$nCls-1; // sisakan minimal 1 untuk train
+  if($tCount===0 && $nCls>1 && $testRatio>0.0) $tCount=1; // jaga-jaga supaya ada sampel uji
+  $testIdx=array_merge($testIdx, array_slice($idxList,0,$tCount));
+  $trainIdx=array_merge($trainIdx, array_slice($idxList,$tCount));
+}
+
+// fallback: jika tidak ada test set sama sekali, paksa ambil 1 dari bucket terbesar
+if(!$testIdx && $totalSamples>1){
+  $largest=null; $maxN=0;
+  foreach($buckets as $clsIdx=>$idxList){
+    $cnt=count($idxList);
+    if($cnt>$maxN){ $maxN=$cnt; $largest=$idxList; }
+  }
+  if($largest){
+    shuffle($largest);
+    $picked=array_shift($largest);
+    $testIdx[]=$picked;
+    $trainIdx=array_values(array_filter($trainIdx,function($v) use($picked){ return $v!==$picked; }));
+  }
+}
+
+shuffle($trainIdx);
+shuffle($testIdx);
+
+$nTrain = count($trainIdx);
+$nTest  = count($testIdx);
+
+///////////////////////////// CLASS COUNTS & WEIGHTS ///////////
+// hitung frekuensi train (sebelum oversample)
+$trainCounts = array_fill(0, $numClasses, 0);
+foreach($trainIdx as $idx){ $trainCounts[$y[$idx]]++; }
+
+// class weight (auto => 1/freq, dinormalisasi agar rata-rata=1)
+$classWeights = array_fill(0, $numClasses, 1.0);
+if($classWeightMode === 'auto'){
+  $totalTrain = array_sum($trainCounts);
+  $avg = $numClasses>0 ? ($totalTrain / max($numClasses,1)) : 0;
+  if($avg>0){
+    foreach($trainCounts as $c=>$cnt){
+      $classWeights[$c] = $cnt>0 ? ($avg / $cnt) : 1.0;
+    }
+  }
+}
+
+///////////////////////////// OVERSAMPLE MINORITY (TRAIN ONLY) //
+if($oversampleMinor > 0 && $nTrain > 0){
+  // bucketkan train per kelas
+  $bucketTrain=[];
+  foreach($trainIdx as $idx){
+    $cls=$y[$idx];
+    if(!isset($bucketTrain[$cls])) $bucketTrain[$cls]=[];
+    $bucketTrain[$cls][]=$idx;
+  }
+  $maxCount = max($trainCounts);
+  $target   = (int)ceil($maxCount * $oversampleMinor);
+  if($target > 0){
+    foreach($bucketTrain as $cls=>$list){
+      $cnt=count($list);
+      if($cnt===0 || $cnt >= $target) continue;
+      // sampling dengan pengulangan sampai mencapai target
+      for($k=$cnt; $k<$target; $k++){
+        $pick=$list[$k % $cnt]; // deterministic cycle
+        $trainIdx[]=$pick;
+        $trainCounts[$cls]++; // update count setelah oversample
+      }
+    }
+    shuffle($trainIdx);
+    $nTrain = count($trainIdx);
+  }
+}
 
 ///////////////////////////// TRAIN (SGD) //////////////////////
 // seed agar shuffle SGD reproducible
 mt_srand(42);
 
-$W=array_fill(0,$dim,0.0); $n=count($X);
+$W=[];
+for($c=0;$c<$numClasses;$c++){
+  $W[$c]=array_fill(0,$dim,0.0); // satu vektor bobot per kelas
+}
+$n=$nTrain;
 $start=microtime(true); $t=0; $epochTimes=[];
 for($ep=0;$ep<$epochs;$ep++){
   $eStart=microtime(true);
-  $order=range(0,$n-1); shuffle($order);
-  foreach($order as $i){
+  $order=$trainIdx; shuffle($order);
+  foreach($order as $idx){
+    // Refresh batas waktu agar tidak terhenti di tengah epoch (jaga-jaga jika environment membatasi 30s)
+    @set_time_limit($MAX_EXEC_TIME);
     $t++; $eta=$eta0/(1.0+$lambda*$eta0*$t);
-    $dot=0.0; $xi=$X[$i]; $yi=$y[$i]; $L=count($xi);
-    for($k=0;$k<$L;$k++) $dot+=$W[$k]*$xi[$k];
-    if($yi*$dot<1.0){
-      for($k=0;$k<$L;$k++) $W[$k]-=$eta*($lambda*$W[$k]-$yi*$xi[$k]);
-    }else{
-      for($k=0;$k<$L;$k++) $W[$k]-=$eta*($lambda*$W[$k]);
+    $xi=$X[$idx]; $yi=$y[$idx]; $L=count($xi);
+    $wSample = $classWeights[$yi] ?? 1.0; // bobot kelas (auto jika diaktifkan)
+    // one-vs-rest: update bobot untuk tiap kelas
+    for($c=0;$c<$numClasses;$c++){
+      $yc = ($c===$yi)?+1.0:-1.0;
+      $dot=0.0;
+      for($k=0;$k<$L;$k++) $dot+=$W[$c][$k]*$xi[$k];
+      if($yc*$dot<1.0){
+        for($k=0;$k<$L;$k++) $W[$c][$k]-=$eta*($lambda*$W[$c][$k]-$wSample*$yc*$xi[$k]);
+      }else{
+        for($k=0;$k<$L;$k++) $W[$c][$k]-=$eta*($lambda*$W[$c][$k]);
+      }
     }
   }
   $epochTimes[]=microtime(true)-$eStart;
@@ -334,13 +514,44 @@ $avgEpoch=array_sum($epochTimes)/max(count($epochTimes),1);
 $throughput=$n*$epochs/max($duration,1e-9);
 
 ///////////////////////////// TRAIN ACC ///////////////////////
+$confTrain = emptyConfusion($numClasses);
 $correct=0;
-for($i=0;$i<$n;$i++){
-  $dot=0.0; $xi=$X[$i]; $yi=$y[$i]; $L=count($xi);
-  for($k=0;$k<$L;$k++) $dot+=$W[$k]*$xi[$k];
-  $pred=($dot>=0)?+1:-1; if($pred===$yi)$correct++;
+foreach($trainIdx as $idx){
+  $xi=$X[$idx]; $yi=$y[$idx]; $L=count($xi);
+  $bestIdx=null; $bestScore=null;
+  for($c=0;$c<$numClasses;$c++){
+    $dot=0.0;
+    for($k=0;$k<$L;$k++) $dot+=$W[$c][$k]*$xi[$k];
+    if($bestScore===null || $dot>$bestScore){
+      $bestScore=$dot; $bestIdx=$c;
+    }
+  }
+  $confTrain[$yi][$bestIdx]++;  // actual=yi, pred=bestIdx
+  if($bestIdx===$yi) $correct++;
 }
-$acc=$correct/$n;
+$trainAcc = $n>0 ? $correct/$n : 0.0;
+$acc = $trainAcc; // backward compatibility
+
+///////////////////////////// TEST ACC /////////////////////////
+$confTest = $nTest>0 ? emptyConfusion($numClasses) : null;
+$testAcc = null;
+if($nTest>0){
+  $correctTest = 0;
+  foreach($testIdx as $idx){
+    $xi=$X[$idx]; $yi=$y[$idx]; $L=count($xi);
+    $bestIdx=null; $bestScore=null;
+    for($c=0;$c<$numClasses;$c++){
+      $dot=0.0;
+      for($k=0;$k<$L;$k++) $dot+=$W[$c][$k]*$xi[$k];
+      if($bestScore===null || $dot>$bestScore){
+        $bestScore=$dot; $bestIdx=$c;
+      }
+    }
+    if($confTest!==null) $confTest[$yi][$bestIdx]++; // actual=yi, pred=bestIdx
+    if($bestIdx===$yi) $correctTest++;
+  }
+  $testAcc = $correctTest/$nTest;
+}
 
 ///////////////////////////// SIMPAN MODEL /////////////////////
 $modelPath=null;
@@ -350,7 +561,8 @@ if($SAVE_MODEL){
   if(!is_dir($storageDir) && !@mkdir($storageDir,0755,true) && !is_dir($storageDir)){
     log_and_exit_fail($db,$userId,"Gagal membuat direktori model: {$storageDir}");
   }
-  $modelPath = rtrim($storageDir,'/\\') . "/svm_user_{$userId}_{$kcfg['type']}.json";
+  // Normalized path so logs tidak campur \\ dan /
+  $modelPath = rtrim($storageDir, '/\\') . DIRECTORY_SEPARATOR . "svm_user_{$userId}_{$kcfg['type']}.json";
   $model = [
     'type'=>'svm_sgd',
     'dim'=>$dim,
@@ -360,7 +572,14 @@ if($SAVE_MODEL){
     'epochs'=>$epochs,
     'eta0'=>$eta0,
     'goal_column'=>$goalKey,
-    'label_map'=>['+1'=>$posLabel,'-1'=>$negLabel],
+    // Multi-class
+    'classes'=>$classLabels,
+    'num_classes'=>$numClasses,
+    // Backward-compat (binary); diabaikan jika 'classes' tersedia
+    'label_map'=>[
+      '+1'=>$classLabels[0] ?? null,
+      '-1'=>$classLabels[1] ?? null
+    ],
     'feature_index'=>$baseIndex,
     'numeric_minmax'=>$nums,
     'kernel'=>$kcfg['type'],
@@ -385,10 +604,21 @@ $db->query("CREATE TABLE IF NOT EXISTS `{$logTable}`(
 )");
 
 $status='success';
-$output="SVM {$kcfg['type']}. source={$sourceTable}; goal={$goalKey}; classes={$posLabel}|{$negLabel}; ".
-        "samples={$n}; acc_train=".number_format($acc*100,2)."%; ".
+$classesStr = implode('|', $classLabels);
+$cmTrainText = formatConfusion($confTrain, $classLabels);
+$cmTestText  = $confTest ? formatConfusion($confTest, $classLabels) : null;
+$cmTrainJson = json_encode($confTrain, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+$cmTestJson  = $confTest ? json_encode($confTest, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) : null;
+$cwModeStr   = $classWeightMode==='auto' ? 'auto' : 'none';
+$output="SVM {$kcfg['type']}. source={$sourceTable}; goal={$goalKey}; classes={$classesStr}; ".
+        "samples_total={$totalSamples}; train={$nTrain}; test={$nTest}; ".
+        "acc_train=".number_format($trainAcc*100,2)."%; ".
+        "acc_test=".($testAcc!==null?number_format($testAcc*100,2):'NA')."%; ".
+        "threshold={$DECISION_THRESHOLD}; ".
         "Execution time=".number_format($duration,4)."s; epoch_avg=".number_format($avgEpoch,4)."s; ".
-        "throughput=".number_format($throughput,1)." samples/s";
+        "throughput=".number_format($throughput,1)." samples/s; ".
+        "oversample_minor={$oversampleMinor}; class_weight={$cwModeStr}; ".
+        "cm_train={$cmTrainJson}; cm_test=".($cmTestJson ?? 'null');
 $stmt=$db->prepare("INSERT INTO `{$logTable}`(status,execution_time,model_path,output,created_at,updated_at)
                     VALUES (?,?,?,?,NOW(),NOW())");
 $stmt->bind_param('sdss',$status,$duration,$modelPath,$output);
@@ -403,13 +633,21 @@ echo "⏱️ Total: ".number_format($duration,6)." s | Avg/epoch: ".number_forma
      " s | Throughput: ".number_format($throughput,1)." samples/s\n";
 echo "🎯 Kelas: +1={$posLabel}, -1={$negLabel}\n";
 if($modelPath) echo "📦 Model: {$modelPath}\n";
+if($cmTrainText) echo "Confusion matrix (train):\n{$cmTrainText}\n";
+if($cmTestText)  echo "Confusion matrix (test):\n{$cmTestText}\n";
 
 echo json_encode([
   'status'=>'success',
   'kernel'=>$kcfg['type'],
   'kernel_meta'=>$kernelMeta,
-  'samples'=>$n,
-  'train_accuracy'=>$acc,
+  'samples'=>[
+    'total'=>$totalSamples,
+    'train'=>$nTrain,
+    'test'=>$nTest,
+  ],
+  'train_accuracy'=>$trainAcc,
+  'test_accuracy'=>$testAcc,
+  'threshold'=>$DECISION_THRESHOLD,
   'execution_time'=>[
     'total_sec'=>$duration,
     'avg_epoch'=>$avgEpoch,
@@ -418,11 +656,19 @@ echo json_encode([
   'hyperparams'=>[
     'epochs'=>$epochs,
     'lambda'=>$lambda,
-    'eta0'=>$eta0
+    'eta0'=>$eta0,
+    'test_ratio'=>$testRatio,
+    'oversample_minor'=>$oversampleMinor,
+    'class_weight'=>$cwModeStr
   ],
   'model_path'=>$modelPath,
-  'source_table'   => $sourceTable,   // <= tambahkan ini
-  'goal_column'    => $goalKey        // <= dan ini
+  'source_table'   => $sourceTable,
+  'goal_column'    => $goalKey,
+  'confusion'      => [
+    'labels' => $classLabels,
+    'train'  => $confTrain,
+    'test'   => $confTest
+  ]
 ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) . PHP_EOL;
 
 $db->close();

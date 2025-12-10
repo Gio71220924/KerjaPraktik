@@ -70,7 +70,25 @@ class SVMController extends Controller
             }
         } catch (\Throwable $e) { /* ignore */ }
 
-        return view('admin.menu.SVM', compact('atributs','goalAttr','valuesByAttr','goalValues','svmData'))
+        // Distribusi kelas di case_user_{userId} (untuk UI)
+        $classStats = collect();
+        try {
+            $caseTable = "case_user_{$userId}";
+            if ($goalAttr && Schema::hasTable($caseTable)) {
+                $goalCol = $goalAttr->atribut_id . '_' . $goalAttr->atribut_name;
+                $classStats = DB::table($caseTable)
+                    ->selectRaw("`{$goalCol}` as label, COUNT(*) as total")
+                    ->whereNotNull($goalCol)
+                    ->where($goalCol, '!=', '')
+                    ->groupBy($goalCol)
+                    ->orderByDesc('total')
+                    ->get();
+            }
+        } catch (\Throwable $e) {
+            $classStats = collect();
+        }
+
+        return view('admin.menu.SVM', compact('atributs','goalAttr','valuesByAttr','goalValues','svmData','classStats'))
             ->with(['message' => null]);
     }
 
@@ -82,13 +100,18 @@ class SVMController extends Controller
         $kernel = (string)$request->input('kernel', 'sgd');
         $table  = "case_user_{$userId}";
 
-        $train = $this->runTraining($userId, $userId, $kernel, redirectBack: false, tableOverride: $table);
+        // Ambil hasil train + meta (confusion matrix, samples, dll.)
+        $train = $this->runTraining($userId, $userId, $kernel, false, $table);
 
         if ($train['error'] ?? false) {
             return back()->with('svm_err', "Training gagal:\n" . ($train['message'] ?? ''));
         }
 
-        return back()->with('svm_ok', trim($train['stdout'] ?? 'Training selesai.'));
+        $meta = $train['json'] ?? [];
+
+        return back()
+            ->with('svm_ok', trim($train['stdout'] ?? 'Training selesai.'))
+            ->with('svm_meta', $meta);
     }
 
     /**
@@ -137,7 +160,7 @@ class SVMController extends Controller
         $tableSrc  = "case_user_{$userId}"; // train dari case_user
 
         // TRAIN
-        $train = $this->runTraining($userId, $userId, $kernel, redirectBack: false, tableOverride: $tableSrc);
+        $train = $this->runTraining($userId, $userId, $kernel, false, $tableSrc);
         if ($train['error'] ?? false) {
             return back()->with('svm_err', "Training gagal:\n" . ($train['message'] ?? ''));
         }
@@ -176,7 +199,23 @@ class SVMController extends Controller
         $ok = "Training OK:\n" . ($train['stdout'] ?? '(no stdout)') . "\n\n"
             . "Prediksi:\n" . $pred['summary'];
 
-        return back()->with('svm_ok', $ok);
+        $meta = $train['json'] ?? [];
+        $meta['predict'] = [
+            'label'      => $pred['label'],
+            'margin'     => $pred['margin'],
+            'confidence' => $pred['confidence'] ?? null,
+            'kernel'     => $pred['kernel'],
+            'goal_key'   => $pred['goal_key'],
+            'top'        => $pred['top'] ?? [],
+        ];
+        // sertakan confusion matrix hasil train supaya bisa divisualisasikan
+        if (isset($train['json']['confusion'])) {
+            $meta['confusion'] = $train['json']['confusion'];
+        }
+
+        return back()
+            ->with('svm_ok', $ok)
+            ->with('svm_meta', $meta);
     }
 
     /* ===========================================================
@@ -316,6 +355,7 @@ class SVMController extends Controller
             table:     $table,
             caseId:    $caseId,
             ruleId:    null,
+            caseGoal:  "{$goalKey} = {$goalLabel}",
             ruleGoal:  "{$goalKey} = {$goalLabel} | kernel={$kernel}",
             match:     $margin,
             execTime:  $execTime,
@@ -357,6 +397,7 @@ class SVMController extends Controller
         string $table,
         string $caseId,
         ?int $ruleId,
+        string $caseGoal,
         string $ruleGoal,
         float $match,
         ?float $execTime,
@@ -367,6 +408,7 @@ class SVMController extends Controller
               id INT AUTO_INCREMENT PRIMARY KEY,
               case_id INT NULL,
               rule_id INT NULL,
+              user_id INT NULL,
               rule_goal LONGTEXT NULL,
               match_value DECIMAL(18,6) NULL,
               waktu DECIMAL(18,8) NULL,
@@ -376,9 +418,17 @@ class SVMController extends Controller
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ");
 
+        // Tambah kolom yang mungkin belum ada pada tabel lama
+        $this->ensureInferenceGenericColumns($table);
+
+        // Legacy tables may have rule_id NOT NULL; avoid NULL insert
+        $ruleIdVal = $ruleId ?? 0;
+
         DB::table($table)->insert([
             'case_id'     => (int)$caseId,
-            'rule_id'     => $ruleId,
+            'rule_id'     => $ruleIdVal,
+            'user_id'     => $userId,
+            'case_goal'   => $caseGoal,
             'rule_goal'   => $ruleGoal,
             'match_value' => $match,
             'waktu'       => $execTime,
@@ -400,6 +450,11 @@ class SVMController extends Controller
         bool $redirectBack = true,
         ?string $tableOverride = null
     ) {
+        // Pastikan eksekusi web tidak dipotong 30s (nginx/apache) saat menunggu proses CLI
+        @ini_set('max_execution_time', '0');
+        @set_time_limit(0);
+        @ignore_user_abort(true);
+
         $phpBin = env('PHP_BIN');
         if (!$phpBin) {
             $finder = new PhpExecutableFinder();
@@ -420,7 +475,16 @@ class SVMController extends Controller
                 : ['error' => true, 'message' => $msg];
         }
 
-        $cmd = [$phpBin, $script, (string)$userId, (string)$caseNum, $kernel];
+        $memoryLimit = env('SVM_MEMORY_LIMIT', '1024M');
+        $cmd = [$phpBin, '-d', 'max_execution_time=0'];
+        if ($memoryLimit) {
+            $cmd[] = '-d';
+            $cmd[] = 'memory_limit=' . $memoryLimit;
+        }
+        $cmd[] = $script;
+        $cmd[] = (string)$userId;
+        $cmd[] = (string)$caseNum;
+        $cmd[] = $kernel;
         if ($tableOverride) $cmd[] = "--table={$tableOverride}";
 
         $proc = new Process($cmd, base_path(), null, null, 600);
@@ -535,6 +599,8 @@ class SVMController extends Controller
         $baseIndex   = $model['feature_index'] ?? [];
         $numMinmax   = $model['numeric_minmax'] ?? [];
         $labelMap    = $model['label_map'] ?? ['+1'=>'POS','-1'=>'NEG'];
+        $classes     = $model['classes'] ?? null;             // multi-class (jika ada)
+        $numClasses  = is_array($classes) ? count($classes) : null;
         $kernelType  = $model['kernel'] ?? $kernelShort;
         $kernelMeta  = $model['kernel_meta'] ?? [];
         $W           = $model['weights'];
@@ -565,23 +631,89 @@ class SVMController extends Controller
             }
         }
 
-        // kernel map + bias + dot
+        // kernel map + bias
         $z = $this->applyKernel($xBase, $kernelType, $kernelMeta, $baseIndex, $numMinmax);
         $z[] = 1.0;
 
-        $dot = 0.0;
-        for ($k=0; $k<count($z); $k++) $dot += ($W[$k] ?? 0.0) * $z[$k];
-        $predSign = ($dot >= 0) ? '+1' : '-1';
-        $predLbl  = $labelMap[$predSign] ?? $predSign;
+        // Hitung skor & confidence untuk semua kelas
+        $classScores = [];
+        if (is_array($classes) && isset($W[0]) && is_array($W[0])) {
+            $L = count($z);
+            // Ambil skor linear
+            $logits = [];
+            foreach ($classes as $idx => $lbl) {
+                $s = 0.0;
+                for ($k=0; $k<$L; $k++) {
+                    $s += ($W[$idx][$k] ?? 0.0) * $z[$k];
+                }
+                $logits[$idx] = $s;
+            }
+            // Softmax untuk menghasilkan probabilitas yang ter-normalisasi
+            $maxLogit = max($logits);
+            $expSum = 0.0;
+            foreach ($logits as $v) {
+                $expSum += exp($v - $maxLogit);
+            }
+            foreach ($classes as $idx => $lbl) {
+                $prob = $expSum > 0 ? exp($logits[$idx] - $maxLogit) / $expSum : 0.0;
+                $classScores[] = [
+                    'label'      => $lbl,
+                    'margin'     => (float)$logits[$idx],
+                    'confidence' => max(0.0, min(1.0, $prob)),
+                ];
+            }
+        } else {
+            // Backward-compat: model binary lama
+            $s = 0.0;
+            for ($k=0; $k<count($z); $k++) {
+                $s += ($W[$k] ?? 0.0) * $z[$k];
+            }
+            $pPos = 1.0 / (1.0 + exp(-$s)); // prob kelas +1
+            $pNeg = 1.0 - $pPos;            // prob kelas -1
+            $posLbl = $labelMap['+1'] ?? '+1';
+            $negLbl = $labelMap['-1'] ?? '-1';
+            $classScores[] = [
+                'label'      => $posLbl,
+                'margin'     => (float)$s,
+                'confidence' => max(0.0, min(1.0, $pPos)),
+            ];
+            $classScores[] = [
+                'label'      => $negLbl,
+                'margin'     => (float)$s,
+                'confidence' => max(0.0, min(1.0, $pNeg)),
+            ];
+        }
+
+        // Urutkan berdasarkan confidence (descending)
+        usort($classScores, function(array $a, array $b): int {
+            return ($b['confidence'] <=> $a['confidence']);
+        });
+
+        // Ambil prediksi utama dari kelas dengan confidence tertinggi
+        $predLbl = 'UNKNOWN';
+        $dot     = 0.0;
+        $conf    = 0.0;
+        if (!empty($classScores)) {
+            $best   = $classScores[0];
+            $predLbl = $best['label'];
+            $dot     = $best['margin'];
+            $conf    = $best['confidence'];
+        }
+
+        // Top-k (mis. 3) label teratas dengan confidence
+        $top = array_slice($classScores, 0, 3);
 
         return [
-            'label'   => $predLbl,
-            'margin'  => (float)$dot,
-            'goal_key'=> $goalKey,
-            'kernel'  => $kernelType,
-            'summary' => "Predict : {$predLbl} (margin=".number_format($dot,4).")\n".
-                         "GoalCol : {$goalKey}\n".
-                         "Kernel  : {$kernelType}"
+            'label'      => $predLbl,
+            'margin'     => (float)$dot,
+            'goal_key'   => $goalKey,
+            'kernel'     => $kernelType,
+            'confidence' => $conf,
+            'top'        => $top,
+            'summary'    => "Predict : {$predLbl} (margin=".number_format($dot,4).")\n".
+                            "Confidence (est.) : ".number_format($conf*100,2)."%\n".
+                            "GoalCol : {$goalKey}\n".
+                            "Kernel  : {$kernelType}"
         ];
     }
 
@@ -590,7 +722,7 @@ class SVMController extends Controller
         if ($type === 'sgd') return $xBase;
 
         if ($type === 'rbf') {
-            $D = (int)($meta['D'] ?? 1024);
+            $D = (int)($meta['D'] ?? 128);
             $gamma = (float)($meta['gamma'] ?? 0.25);
             $seed  = (int)($meta['seed'] ?? crc32(json_encode(array_keys($baseIndex))));
             mt_srand($seed);
@@ -620,7 +752,7 @@ class SVMController extends Controller
         }
 
         if ($type === 'sigmoid') {
-            $D=(int)($meta['D'] ?? 1024);
+            $D=(int)($meta['D'] ?? 128);
             $scale=(float)($meta['scale'] ?? 1.0);
             $coef0=(float)($meta['coef0'] ?? 0.0);
             $seed= (int)($meta['seed'] ?? (14641 ^ crc32(json_encode(array_keys($baseIndex)))));
@@ -649,5 +781,37 @@ class SVMController extends Controller
         }
 
         return $xBase;
+    }
+
+    /**
+     * Pastikan tabel inferensi generik punya kolom minimal yang dibutuhkan agar insert tidak gagal.
+     */
+    private function ensureInferenceGenericColumns(string $table): void
+    {
+        $cols = [
+            'case_id'     => 'INT NULL',
+            'rule_id'     => 'INT NULL',
+            'user_id'     => 'INT NULL',
+            'case_goal'   => 'LONGTEXT NULL',
+            'rule_goal'   => 'LONGTEXT NULL',
+            'match_value' => 'DECIMAL(18,6) NULL',
+            'waktu'       => 'DECIMAL(18,8) NULL',
+            'kernel'      => 'VARCHAR(255) NULL',
+            'created_at'  => 'TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP',
+            'updated_at'  => 'TIMESTAMP NULL DEFAULT NULL',
+        ];
+
+        foreach ($cols as $col => $ddl) {
+            try {
+                if (!Schema::hasColumn($table, $col)) {
+                    DB::statement("ALTER TABLE `{$table}` ADD COLUMN `{$col}` {$ddl}");
+                } elseif ($col === 'user_id') {
+                    // Pastikan user_id nullable agar tabel lama yang NOT NULL tidak memblok insert
+                    DB::statement("ALTER TABLE `{$table}` MODIFY COLUMN `user_id` INT NULL");
+                }
+            } catch (\Throwable $e) {
+                // jika gagal (mis. hak akses), biarkan supaya error/log tampil jelas
+            }
+        }
     }
 }

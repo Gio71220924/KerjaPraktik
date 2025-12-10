@@ -38,45 +38,47 @@
         </ol>
     @else
         <div class="card-body">
-            <table class="table table-bordered">
-                <thead>
-                    <tr>
-                        <th>No</th>
-                        <th>Case Title</th>
-                        {{-- <th>Case Goal</th> --}}
-                        <th>Rule Id</th>
-                        <th>Rule Goal</th>
-                        <th>Match Value</th>
-                        {{-- <th>Cocok</th> --}}
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach ($inference as $index => $inferensi )
-                    <tr>
-                        <td>{{ $index + 1 }}</td>
-                        <td>{{ $kasus->case_title }}</td>
-                        {{-- <td>
-                            @php
-                                $cleanedIfPart = preg_replace('/\b\d+_/', '', $inferensi->case_goal);
-                            @endphp
-                            {{ $cleanedIfPart }}
-                        </td> --}}
-                        <td>{{ $inferensi->rule_id }}</td>
-                        <td>
-                            @php
-                                $cleanedIfPart = preg_replace('/\b\d+_/', ' ', $inferensi->rule_goal);
-                                $cleanedIfPart = str_replace('_', ' ', $cleanedIfPart);
-                                $cleanedIfPart = str_replace('-', ' ', $cleanedIfPart);
-                                $cleanedIfPart = str_replace('=', ' =', $cleanedIfPart);
-                            @endphp
-                            {{ $cleanedIfPart }}
-                        </td>
-                        <td>{{ $inferensi->match_value }}</td>
-                        {{-- <td>{{ $inferensi->cocok }}</td> --}}
-                    </tr>
-                    @endforeach
-                </tbody>
-            </table>
+            <div class="table-responsive">
+                <table class="table table-bordered mb-0">
+                    <thead>
+                        <tr>
+                            <th>No</th>
+                            <th>Case Title</th>
+                            {{-- <th>Case Goal</th> --}}
+                            <th>Rule Id</th>
+                            <th>Rule Goal</th>
+                            <th>Match Value</th>
+                            {{-- <th>Cocok</th> --}}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($inference as $index => $inferensi )
+                        <tr>
+                            <td>{{ $index + 1 }}</td>
+                            <td>{{ $kasus->case_title }}</td>
+                            {{-- <td>
+                                @php
+                                    $cleanedIfPart = preg_replace('/\b\d+_/', '', $inferensi->case_goal);
+                                @endphp
+                                {{ $cleanedIfPart }}
+                            </td> --}}
+                            <td>{{ $inferensi->rule_id }}</td>
+                            <td>
+                                @php
+                                    $cleanedIfPart = preg_replace('/\b\d+_/', ' ', $inferensi->rule_goal);
+                                    $cleanedIfPart = str_replace('_', ' ', $cleanedIfPart);
+                                    $cleanedIfPart = str_replace('-', ' ', $cleanedIfPart);
+                                    $cleanedIfPart = str_replace('=', ' =', $cleanedIfPart);
+                                @endphp
+                                {{ $cleanedIfPart }}
+                            </td>
+                            <td>{{ $inferensi->match_value }}</td>
+                            {{-- <td>{{ $inferensi->cocok }}</td> --}}
+                        </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
         </div>
     @endif
 

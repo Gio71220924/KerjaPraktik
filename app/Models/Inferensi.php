@@ -43,7 +43,11 @@ class Inferensi extends Model
     public function getRules()
     {
         if ($this->tableExists()) {
-            return DB::table($this->table)->get();
+            // Ambil data secukupnya supaya tampilan tidak kehabisan memori
+            return DB::table($this->table)
+                ->orderByDesc('inf_id')
+                ->limit(500)
+                ->get();
         } else {
             // Return empty collection if the table doesn't exist
             return collect([]);

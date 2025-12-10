@@ -29,6 +29,8 @@ class AuthController extends Controller
         //proses input
         $user = new User();
         $user->username = $request-> username;
+        $user->role = 'user';     // default role
+        $user->active = 'T';      // mark new user active
         $user->password = bcrypt($request-> password);
         $user->save();
 
@@ -72,9 +74,11 @@ class AuthController extends Controller
         $user = User::where('username', $request->username)->first();
 
         // Cek apakah user ditemukan dan password cocok
-        if ($user && Hash::check($request->password, $user->password)) {
+        if ($user && $this->passwordMatchesAndRehash($user, $request->password)) {
+            $userRole = strtolower((string)($user->role ?: 'user'));
+
             // Cek apakah user adalah admin
-            if ($user->role === 'user') {
+            if ($userRole === 'user') {
                 if ($user->active === 'Inactive') {
                     return back()->withErrors(['username' => 'Your account is inactive. Please contact admin.']);
                 }
@@ -109,9 +113,11 @@ class AuthController extends Controller
         $user = User::where('username', $request->username)->first();
 
         // Cek apakah user ditemukan dan password cocok
-        if ($user && Hash::check($request->password, $user->password)) {
+        if ($user && $this->passwordMatchesAndRehash($user, $request->password)) {
+            $userRole = strtolower((string)($user->role ?: 'user'));
+
             // Cek apakah user adalah admin
-            if ($user->role === 'admin') {
+            if ($userRole === 'admin') {
                 // Login user
                 Auth::login($user);
 
@@ -155,6 +161,32 @@ class AuthController extends Controller
         $kasus->save(); // Simpan perubahan ke database
     
         return redirect()->back()->with('success', 'Project updated successfully!');
+    }
+    
+    /**
+     * Verifies the password while tolerating legacy plain-text rows and
+     * transparently rehashing them to bcrypt for future logins.
+     */
+    private function passwordMatchesAndRehash(User $user, string $plainPassword): bool
+    {
+        try {
+            if (Hash::check($plainPassword, $user->password)) {
+                if (Hash::needsRehash($user->password)) {
+                    $user->password = Hash::make($plainPassword);
+                    $user->save();
+                }
+                return true;
+            }
+        } catch (\RuntimeException $e) {
+            // Hash::check throws when stored value is not a bcrypt hash
+            if (hash_equals($user->password, $plainPassword)) {
+                $user->password = Hash::make($plainPassword);
+                $user->save();
+                return true;
+            }
+        }
+
+        return false;
     }
     
 }

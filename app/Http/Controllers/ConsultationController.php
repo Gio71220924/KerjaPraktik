@@ -129,7 +129,7 @@ class ConsultationController extends Controller
 
         // === Support Vector Machine (train → infer → insert ke inferensi_user_{userId} + diagnostics)
         if ($actionType === 'Support Vector Machine') {
-            $kernel = $request->input('svm_kernel', 'sgd'); // contoh: sgd | rbf:D=1024:gamma=0.25 | sigmoid:D=...
+            $kernel = $request->input('svm_kernel', 'sgd'); // contoh: sgd | rbf:D=128:gamma=0.25 | sigmoid:D=...
             $kernelShort = strtolower(explode(':', $kernel)[0]);
 
             $phpBin = $this->resolvePhpBinary();
@@ -158,7 +158,7 @@ class ConsultationController extends Controller
             $diag[] = $this->diagLine('Inferensi before', (string)$before);
 
             // TRAIN
-            $trainCmd = [$phpBin, $svmScript, (string)$user_id, (string)$user_id, $kernel, "--table={$table}"];
+            $trainCmd = $this->withPhpIniOverrides([$phpBin, $svmScript, (string)$user_id, (string)$user_id, $kernel, "--table={$table}"]);
             $trainRes = $this->runProcess($trainCmd, 600);
             $diag[]   = $this->diagLine('Train CMD', $trainRes['cmd'], $trainRes['ok']);
 
@@ -186,14 +186,14 @@ class ConsultationController extends Controller
             }
 
             // INFER
-            $inferCmd = [
+            $inferCmd = $this->withPhpIniOverrides([
                 $phpBin,
                 $inferScript,
                 (string) $user_id,
                 (string) $user_id,
                 "--table={$table}",
                 "--kernel={$kernelShort}",
-            ];
+            ]);
             $inferRes = $this->runProcess($inferCmd, 300);
             $diag[]   = $this->diagLine('Infer CMD', $inferRes['cmd'], $inferRes['ok']);
 
@@ -338,6 +338,11 @@ class ConsultationController extends Controller
 
     private function runProcess(array $cmd, int $timeoutSec = 600): array
     {
+        // Hindari request web dipotong 30s saat menunggu proses CLI berat
+        @ini_set('max_execution_time', (string)$timeoutSec);
+        @set_time_limit($timeoutSec);
+        @ignore_user_abort(true);
+
         $pretty = implode(' ', array_map(fn($p) => str_contains($p, ' ') ? "\"$p\"" : $p, $cmd));
         $proc = new Process($cmd, base_path(), null, null, $timeoutSec);
         $proc->run();
@@ -348,6 +353,27 @@ class ConsultationController extends Controller
             'stdout'  => trim($proc->getOutput() ?? ''),
             'stderr'  => trim($proc->getErrorOutput() ?? ''),
         ];
+    }
+
+    /**
+     * Tambahkan override PHP ini_set saat eksekusi proses CLI (hilangkan batas waktu & atur memory_limit).
+     */
+    private function withPhpIniOverrides(array $cmd): array
+    {
+        if (empty($cmd)) return $cmd;
+        $bin = strtolower((string)($cmd[0] ?? ''));
+        if (!str_contains($bin, 'php')) return $cmd;
+
+        $memoryLimit = env('SVM_MEMORY_LIMIT', '1024M');
+        $opts = ['-d', 'max_execution_time=0'];
+        if ($memoryLimit) {
+            $opts[] = '-d';
+            $opts[] = 'memory_limit=' . $memoryLimit;
+        }
+
+        // sisipkan opsi setelah php binary
+        array_splice($cmd, 1, 0, $opts);
+        return $cmd;
     }
 
     private function countInferensi(int $userId): int
@@ -369,7 +395,9 @@ class ConsultationController extends Controller
         $dirs = SvmModelLocator::directories();
         $fallbackDir = $dirs[0] ?? (function_exists('base_path') ? base_path('svm_models') : getcwd());
 
-        return rtrim($fallbackDir, '/\\') . DIRECTORY_SEPARATOR . $fileName;
+        // Normalize to the platform directory separator to avoid mixed "/" and "\" in output.
+        $base = rtrim($fallbackDir, '/\\');
+        return $base . DIRECTORY_SEPARATOR . $fileName;
     }
 
     private function resolvePhpBinary(): string

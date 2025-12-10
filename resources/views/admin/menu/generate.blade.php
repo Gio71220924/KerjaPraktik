@@ -30,7 +30,7 @@
     </div>
 @endif
 
-<div class="d-flex gap-2">
+<div class="d-flex flex-wrap gap-2">
     <form action="{{ route('generate.case') }}" method="POST">
         @csrf
         <button type="submit" class="btn btn-warning">Generate</button>
@@ -55,48 +55,50 @@
     </ol>
 @else
     <div class="card-body">
-        <table class="table table-bordered">
-            <thead>
-                <tr>
-                    <th>No</th>
-                    <th>Case Title</th>
-                    @foreach($columns as $column)
-                        @if(!in_array($column, $excludeColumns))
-                            <th>{{ ucfirst(str_replace('_', ' ', preg_replace('/\b\d+_/', ' ', $column))) }}</th>
-                        @endif
-                    @endforeach
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach ($generateCase as $index => $row)
+        <div class="table-responsive">
+            <table class="table table-bordered mb-0">
+                <thead>
                     <tr>
-                        <td>{{ $generateCase->firstItem() + $index }}</td>
-                        <td>{{ $kasus->case_title }}</td>
+                        <th>No</th>
+                        <th>Case Title</th>
                         @foreach($columns as $column)
                             @if(!in_array($column, $excludeColumns))
-                                <td>
-                                    @php
-                                        $cleanedIfPart = preg_replace('/\b\d+_/', ' ', $row->$column);
-                                        $cleanedIfPart = str_replace('_', ' ', $cleanedIfPart);
-                                        $cleanedIfPart = str_replace('-', ' ', $cleanedIfPart);
-                                        @endphp
-                                    {{ $cleanedIfPart }}
-                                </td>
+                                <th>{{ ucfirst(str_replace('_', ' ', preg_replace('/\b\d+_/', ' ', $column))) }}</th>
                             @endif
                         @endforeach
-                        <td>
-                            <a href="{{ route('generate.case.edit', $row->case_id) }}" class="btn btn-warning btn-sm">Edit</a>
-                            <form action="{{ route('generate.case.destroy', $row->case_id) }}" method="POST" style="display:inline;">
-                                @csrf
-                                @method('DELETE')
-                                <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure?')">Delete</button>
-                            </form>
-                        </td>                        
+                        <th>Action</th>
                     </tr>
-                @endforeach
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach ($generateCase as $index => $row)
+                        <tr>
+                            <td>{{ $generateCase->firstItem() + $index }}</td>
+                            <td>{{ $kasus->case_title }}</td>
+                            @foreach($columns as $column)
+                                @if(!in_array($column, $excludeColumns))
+                                    <td>
+                                        @php
+                                            $cleanedIfPart = preg_replace('/\b\d+_/', ' ', $row->$column);
+                                            $cleanedIfPart = str_replace('_', ' ', $cleanedIfPart);
+                                            $cleanedIfPart = str_replace('-', ' ', $cleanedIfPart);
+                                            @endphp
+                                        {{ $cleanedIfPart }}
+                                    </td>
+                                @endif
+                            @endforeach
+                            <td>
+                                <a href="{{ route('generate.case.edit', $row->case_id) }}" class="btn btn-warning btn-sm">Edit</a>
+                                <form action="{{ route('generate.case.destroy', $row->case_id) }}" method="POST" style="display:inline;">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure?')">Delete</button>
+                                </form>
+                            </td>                        
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
 
         <!-- Navigasi Pagination -->
         <div class="d-flex justify-content-center mt-4">

@@ -79,6 +79,8 @@ $W          = $model['weights'] ?? null;
 $biasIndex  = $model['bias_index'] ?? null;
 $goalCol    = $model['goal_column'] ?? null;
 $labelMap   = $model['label_map'] ?? ['+1'=>'POS','-1'=>'NEG'];
+$classes    = $model['classes'] ?? null;            // multi-class: daftar label
+$numClasses = is_array($classes) ? count($classes) : null;
 $baseIndex  = $model['feature_index'] ?? [];
 $numMinmax  = $model['numeric_minmax'] ?? [];
 $kernelType = $model['kernel'] ?? 'sgd';
@@ -117,7 +119,7 @@ function applyKernel(array $xBase, string $type, array $meta, array $baseIndex):
   if ($type==='sgd') return $xBase;
 
   if ($type==='rbf'){
-    $D=(int)($meta['D'] ?? 1024); $gamma=(float)($meta['gamma'] ?? 0.25);
+    $D=(int)($meta['D'] ?? 128); $gamma=(float)($meta['gamma'] ?? 0.25);
     $seed=(int)($meta['seed'] ?? crc32(json_encode(array_keys($baseIndex)))); mt_srand($seed);
     $B=count($xBase); $omega=[]; $b=[]; $z=array_fill(0,$D,0.0);
     for($j=0;$j<$D;$j++){
@@ -137,7 +139,7 @@ function applyKernel(array $xBase, string $type, array $meta, array $baseIndex):
   }
 
   if ($type==='sigmoid'){
-    $D=(int)($meta['D'] ?? 1024); $scale=(float)($meta['scale'] ?? 1.0); $coef0=(float)($meta['coef0'] ?? 0.0);
+    $D=(int)($meta['D'] ?? 128); $scale=(float)($meta['scale'] ?? 1.0); $coef0=(float)($meta['coef0'] ?? 0.0);
     $seed=(int)($meta['seed'] ?? (14641 ^ crc32(json_encode(array_keys($baseIndex))))); mt_srand($seed);
     $B=count($xBase); $W=[]; $b=[]; $z=array_fill(0,$D,0.0);
     for($j=0;$j<$D;$j++){
@@ -197,8 +199,26 @@ while($r=$cases->fetch_assoc()){
   $z=applyKernel($xBase,$kernelType,$kernelMeta,$baseIndex);
   $z[] = 1.0;
 
-  $dot=0.0; for($i=0;$i<count($z);$i++) $dot+=($W[$i]??0.0)*$z[$i];
-  $sign=($dot>=0)?'+1':'-1'; $pred=$labelMap[$sign] ?? $sign;
+  // Jika model multi-class (weights matriks & ada 'classes'), pilih kelas dengan skor tertinggi
+  if (is_array($classes) && isset($W[0]) && is_array($W[0])) {
+    $bestIdx = null;
+    $bestScore = null;
+    $L = count($z);
+    for ($c=0; $c<$numClasses; $c++) {
+      $dot = 0.0;
+      for ($i=0; $i<$L; $i++) $dot += ($W[$c][$i] ?? 0.0) * $z[$i];
+      if ($bestScore === null || $dot > $bestScore) {
+        $bestScore = $dot;
+        $bestIdx   = $c;
+      }
+    }
+    $pred = $classes[$bestIdx] ?? 'UNKNOWN';
+    $dot  = (float)$bestScore;
+  } else {
+    // Backward-compat: model binary lama (label_map +1/-1)
+    $dot=0.0; for($i=0;$i<count($z);$i++) $dot+=($W[$i]??0.0)*$z[$i];
+    $sign=($dot>=0)?'+1':'-1'; $pred=$labelMap[$sign] ?? $sign;
+  }
 
   $goalKey = $goalCol ?: (array_key_exists('goal',$r)?'goal':null);
   $actual  = $goalKey && array_key_exists($goalKey,$r) ? (string)$r[$goalKey] : '';

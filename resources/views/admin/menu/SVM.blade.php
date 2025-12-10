@@ -1,6 +1,15 @@
 @extends('layouts.admin')
 
 @section('content')
+<style>
+  .svm-conf {overflow-x: auto;}
+  .svm-conf table {border-collapse: collapse; min-width: 360px;}
+  .svm-conf th, .svm-conf td {border: 1px solid #e5e7eb; padding: 6px 8px; text-align: center; font-size: 12px;}
+  .svm-conf th {background: #f8fafc; font-weight: 600;}
+  .svm-conf .axis {background: #f1f5f9; font-weight: 600;}
+  .svm-distrib .bar {height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden;}
+  .svm-distrib .fill {display: block; height: 100%; border-radius: 999px;}
+</style>
 <div class="container mt-4">
   <h2>Support Vector Machine (SVM)</h2>
   <hr>
@@ -12,10 +21,290 @@
   @if(session('svm_err'))
     <div class="alert alert-danger"><pre class="mb-0">{{ session('svm_err') }}</pre></div>
   @endif
+  @php $meta = session('svm_meta'); @endphp
+  @if(is_array($meta) && !empty($meta))
+    @php
+      $samples   = $meta['samples']      ?? [];
+      $predict   = $meta['predict']      ?? [];
+      $predConf  = $predict['confidence'] ?? null;
+      $predLabel = $predict['label']      ?? null;
+      $predKernel= $predict['kernel']      ?? ($meta['kernel'] ?? null);
+      $threshold = $meta['threshold']      ?? null;
+      $hyper     = $meta['hyperparams']    ?? [];
+      $conf      = $meta['confusion']      ?? null;
+      $labels    = $conf['labels'] ?? [];
+      $cmTrain   = $conf['train']  ?? null;
+      $cmTest    = $conf['test']   ?? null;
+      // distribusi label aktual dari confusion matrix (train/test)
+      $distTrain = [];
+      $distTest  = [];
+      if (is_array($cmTrain)) {
+        foreach ($cmTrain as $i => $row) {
+          $distTrain[] = [
+            'label' => $labels[$i] ?? "Label {$i}",
+            'total' => array_sum($row),
+          ];
+        }
+      }
+      if (is_array($cmTest)) {
+        foreach ($cmTest as $i => $row) {
+          $distTest[] = [
+            'label' => $labels[$i] ?? "Label {$i}",
+            'total' => array_sum($row),
+          ];
+        }
+      }
+      $palette = ['#2563eb','#f97316','#10b981','#a855f7','#ef4444','#14b8a6','#f59e0b','#06b6d4'];
+    @endphp
+    <div class="alert alert-info">
+      <strong>Hasil predict SVM (Generate &amp; Predict):</strong>
+      <ul class="mb-0">
+        <li>Jumlah data: latih = {{ $samples['train'] ?? '?' }}, uji = {{ $samples['test'] ?? '?' }} (total = {{ $samples['total'] ?? '?' }})</li>
+        <li>Prediksi terakhir: {{ $predLabel ?? '(tidak tersedia)' }}</li>
+        <li>Kernel yang dipilih: {{ $predKernel ?? '(tidak tersedia)' }}</li>
+        <li>
+          Akurasi prediksi (estimasi keyakinan):
+          @if($predConf !== null)
+            {{ number_format($predConf*100,2) }}%
+            @if($predConf < 0.7)
+              <span class="text-warning">(model kurang yakin, &lt; 70%)</span>
+            @else
+              <span class="text-success">(model cukup/sangat yakin)</span>
+            @endif
+          @else
+            NA
+          @endif
+        </li>
+        @php $top = $predict['top'] ?? []; @endphp
+        @if(is_array($top) && count($top) > 0)
+          <li>
+            Top rekomendasi keputusan:
+            <ol class="mb-0">
+              @foreach($top as $item)
+                <li>
+                  {{ $item['label'] ?? '?' }}
+                  ({{ isset($item['confidence']) ? number_format($item['confidence']*100,2) . '%' : 'NA' }})
+                </li>
+              @endforeach
+            </ol>
+          </li>
+        @endif
+        <li>Threshold keputusan: {{ $threshold !== null ? $threshold : 'default (0.0)' }}</li>
+        <li>Hyperparameter: epochs = {{ $hyper['epochs'] ?? '?' }}, lambda = {{ $hyper['lambda'] ?? '?' }}, eta0 = {{ $hyper['eta0'] ?? '?' }}, test_ratio = {{ $hyper['test_ratio'] ?? '0.2' }}</li>
+      </ul>
+
+      {{-- Visualisasi sederhana setelah Generate & Predict --}}
+      @php
+        $confPercent = $predConf !== null ? max(0, min(100, $predConf * 100)) : null;
+      @endphp
+      @if($confPercent !== null || (is_array($top) && count($top) > 0))
+        <hr>
+        <div class="mt-2">
+          <h6 class="mb-2">Visualisasi Hasil Prediksi</h6>
+
+          {{-- Bar utama untuk label terprediksi --}}
+          @if($confPercent !== null)
+            <div class="mb-3">
+              <div class="d-flex justify-content-between mb-1">
+                <span>Prediksi: <strong>{{ $predLabel }}</strong></span>
+                <span>{{ number_format($confPercent, 2) }}%</span>
+              </div>
+              <div class="progress" style="height: 18px;">
+                <div
+                  class="progress-bar {{ $confPercent < 70 ? 'bg-warning' : 'bg-success' }}"
+                  role="progressbar"
+                  style="width: {{ $confPercent }}%;"
+                  aria-valuenow="{{ $confPercent }}"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                ></div>
+              </div>
+            </div>
+          @endif
+
+          {{-- Bar untuk top-N rekomendasi --}}
+          @if(is_array($top) && count($top) > 0)
+            <div>
+              <small class="text-muted d-block mb-1">Top rekomendasi (semakin panjang bar, semakin tinggi keyakinan):</small>
+              @foreach($top as $item)
+                @php
+                  $c = isset($item['confidence']) ? max(0, min(100, $item['confidence'] * 100)) : null;
+                @endphp
+                <div class="mb-2">
+                  <div class="d-flex justify-content-between">
+                    <span>{{ $item['label'] ?? '?' }}</span>
+                    <span>{{ $c !== null ? number_format($c,2).'%' : 'NA' }}</span>
+                  </div>
+                  @if($c !== null)
+                    <div class="progress" style="height: 12px;">
+                      <div
+                        class="progress-bar bg-info"
+                        role="progressbar"
+                        style="width: {{ $c }}%;"
+                        aria-valuenow="{{ $c }}"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                      ></div>
+                    </div>
+                  @else
+                    <div class="progress" style="height: 12px;">
+                      <div class="progress-bar bg-secondary" style="width: 100%;"></div>
+                    </div>
+                  @endif
+                </div>
+              @endforeach
+            </div>
+          @endif
+        </div>
+      @endif
+    </div>
+  @endif
+
+  {{-- Visualisasi confusion matrix + distribusi label (hasil train/test) --}}
+  @if(isset($conf) && is_array($conf) && is_array($labels) && count($labels) > 0)
+    <div class="card mb-4">
+      <div class="card-header fw-semibold">Hasil Train/Test (Confusion Matrix &amp; Distribusi)</div>
+      <div class="card-body">
+        <div class="row g-4">
+          @if(is_array($cmTrain))
+            @php
+              $maxTrain = 0;
+              foreach ($cmTrain as $r) foreach ($r as $v) { if ($v > $maxTrain) $maxTrain = $v; }
+              $totalTrainRow = array_sum(array_map('array_sum', $cmTrain));
+            @endphp
+            <div class="col-lg-6">
+              <h6 class="mb-2">Confusion Matrix (Train)</h6>
+              <div class="svm-conf mb-3">
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="axis">Actual \\ Pred</th>
+                      @foreach($labels as $lbl)
+                        <th>{{ $lbl }}</th>
+                      @endforeach
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @foreach($cmTrain as $i => $row)
+                      <tr>
+                        <th class="axis">{{ $labels[$i] ?? $i }}</th>
+                        @foreach($row as $v)
+                          @php
+                            $ratio = $maxTrain > 0 ? $v / $maxTrain : 0;
+                            $alpha = 0.18 + (0.55 * $ratio);
+                            $bg    = "rgba(37, 99, 235, {$alpha})";
+                            $fg    = $ratio > 0.55 ? '#fff' : '#111';
+                          @endphp
+                          <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
+                        @endforeach
+                      </tr>
+                    @endforeach
+                  </tbody>
+                </table>
+              </div>
+
+              {{-- Distribusi label actual pada data train --}}
+              @if(!empty($distTrain))
+                @php $totalTrain = max(1, array_sum(array_column($distTrain, 'total'))); @endphp
+                <div class="svm-distrib">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-semibold">Distribusi Label (Train)</span>
+                    <small class="text-muted">Total {{ $totalTrainRow }} sampel</small>
+                  </div>
+                  @foreach($distTrain as $i => $d)
+                    @php
+                      $p = $totalTrain > 0 ? ($d['total'] / $totalTrain) * 100 : 0;
+                      $color = $palette[$i % count($palette)];
+                    @endphp
+                    <div class="mb-2">
+                      <div class="d-flex justify-content-between small text-muted">
+                        <span class="fw-semibold text-dark">{{ $d['label'] }}</span>
+                        <span>{{ number_format($p,1) }}% ({{ $d['total'] }})</span>
+                      </div>
+                      <div class="bar">
+                        <span class="fill" style="width: {{ max(3, $p) }}%; background: {{ $color }};"></span>
+                      </div>
+                    </div>
+                  @endforeach
+                </div>
+              @endif
+            </div>
+          @endif
+
+          @if(is_array($cmTest))
+            @php
+              $maxTest = 0;
+              foreach ($cmTest as $r) foreach ($r as $v) { if ($v > $maxTest) $maxTest = $v; }
+              $totalTestRow = array_sum(array_map('array_sum', $cmTest));
+            @endphp
+            <div class="col-lg-6">
+              <h6 class="mb-2">Confusion Matrix (Test)</h6>
+              <div class="svm-conf mb-3">
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="axis">Actual \\ Pred</th>
+                      @foreach($labels as $lbl)
+                        <th>{{ $lbl }}</th>
+                      @endforeach
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @foreach($cmTest as $i => $row)
+                      <tr>
+                        <th class="axis">{{ $labels[$i] ?? $i }}</th>
+                        @foreach($row as $v)
+                          @php
+                            $ratio = $maxTest > 0 ? $v / $maxTest : 0;
+                            $alpha = 0.18 + (0.55 * $ratio);
+                            $bg    = "rgba(16, 185, 129, {$alpha})";
+                            $fg    = $ratio > 0.55 ? '#fff' : '#111';
+                          @endphp
+                          <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
+                        @endforeach
+                      </tr>
+                    @endforeach
+                  </tbody>
+                </table>
+              </div>
+
+              {{-- Distribusi label actual pada data test --}}
+              @if(!empty($distTest))
+                @php $totalTest = max(1, array_sum(array_column($distTest, 'total'))); @endphp
+                <div class="svm-distrib">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-semibold">Distribusi Label (Test)</span>
+                    <small class="text-muted">Total {{ $totalTestRow }} sampel</small>
+                  </div>
+                  @foreach($distTest as $i => $d)
+                    @php
+                      $p = $totalTest > 0 ? ($d['total'] / $totalTest) * 100 : 0;
+                      $color = $palette[$i % count($palette)];
+                    @endphp
+                    <div class="mb-2">
+                      <div class="d-flex justify-content-between small text-muted">
+                        <span class="fw-semibold text-dark">{{ $d['label'] }}</span>
+                        <span>{{ number_format($p,1) }}% ({{ $d['total'] }})</span>
+                      </div>
+                      <div class="bar">
+                        <span class="fill" style="width: {{ max(3, $p) }}%; background: {{ $color }};"></span>
+                      </div>
+                    </div>
+                  @endforeach
+                </div>
+              @endif
+            </div>
+          @endif
+        </div>
+      </div>
+    </div>
+  @endif
 
   {{-- ======== TRAIN MANUAL (case_num & sumber training otomatis) ======== --}}
   <div class="card mb-4">
-    <div class="card-header fw-semibold">Train (Otomatis: case_user_{userId})</div>
+    <div class="card-header fw-semibold">
+      Train (Otomatis: case_user_{{ Auth::id() }})
+    </div>
     <div class="card-body">
       <form action="{{ route('SVM.generate') }}" method="POST" class="row g-3">
         @csrf
@@ -24,8 +313,8 @@
           <label class="form-label">Kernel</label>
           <select name="kernel" class="form-select">
             <option value="sgd">SGD (Linear)</option>
-            <option value="rbf:D=1024:gamma=0.25">RBF — D=1024, γ=0.25</option>
-            <option value="sigmoid:D=1024:scale=1.0:coef0=0.0">Sigmoid — D=1024, scale=1.0, coef0=0.0</option>
+            <option value="rbf:D=128:gamma=0.25">RBF — D=128, γ=0.25</option>
+            <option value="sigmoid:D=128:scale=1.0:coef0=0.0">Sigmoid — D=128, scale=1.0, coef0=0.0</option>
           </select>
         </div>
         <div class="col-md-3 d-flex align-items-end">
@@ -49,8 +338,8 @@
             {{-- Hanya untuk UI; nilai sebenarnya dikirim lewat hidden #kernelHidden --}}
             <select id="kernelSelect" class="form-select" required>
               <option value="sgd" selected>SGD (Linear)</option>
-              <option value="rbf:D=1024:gamma=0.25">RBF — D=1024, γ=0.25</option>
-              <option value="sigmoid:D=1024:scale=1.0:coef0=0.0">Sigmoid — D=1024, scale=1.0, coef0=0.0</option>
+              <option value="rbf:D=128:gamma=0.25">RBF — D=128, γ=0.25</option>
+              <option value="sigmoid:D=128:scale=1.0:coef0=0.0">Sigmoid — D=128, scale=1.0, coef0=0.0</option>
               <option value="custom">Custom…</option>
             </select>
             <small class="text-muted">Format: <code>sgd</code>, <code>rbf:D=...:gamma=...</code>, <code>sigmoid:D=...:scale=...:coef0=...</code></small>
@@ -68,7 +357,7 @@
           </div>
           <div class="col-md-2 d-none" id="customDWrap">
             <label class="form-label">D</label>
-            <input type="number" min="1" step="1" id="customD" class="form-control" value="1024">
+            <input type="number" min="1" step="1" id="customD" class="form-control" value="128">
           </div>
           <div class="col-md-2 d-none" id="customGammaWrap">
             <label class="form-label">gamma (RBF)</label>

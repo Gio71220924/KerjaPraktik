@@ -28,7 +28,8 @@ class User extends Authenticatable
     // Jika ada enum untuk active, bisa dibuat accessor untuk mempermudah akses enum
     public function getActiveAttribute($value)
     {
-        return $value === 'T' ? 'Active' : 'Inactive';
+        $normalized = strtolower((string) $value);
+        return in_array($normalized, ['t', '1', 'active'], true) ? 'Active' : 'Inactive';
     }
 
     // Jika kamu ingin menyembunyikan password saat diakses dalam response
