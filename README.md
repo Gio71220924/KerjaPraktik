@@ -22,6 +22,22 @@ Aplikasi berbasis Laravel untuk klasifikasi data menggunakan Support Vector Mach
 
 ## Instalasi Singkat
 
+### Menggunakan Laravel Herd (Direkomendasikan)
+
+Laravel Herd adalah alat resmi Laravel untuk pengembangan lokal. Untuk menjalankan aplikasi ini dengan Herd:
+
+1. Pastikan Laravel Herd sudah terinstal di sistem Anda
+2. Import folder proyek ini ke Herd:
+   - Buka aplikasi Herd
+   - Klik "Add Site"
+   - Pilih folder sebagai root folder
+   - Beri nama situs (misalnya: dutashell.test)
+   - Tambahkan situs baru dan jalankan melalui Herd
+
+### Alternatif: Menggunakan Artisan Serve
+
+Jika tidak menggunakan Herd, jalankan perintah berikut:
+
 ```bash
 # Clone repository
 git clone <repository-url>
@@ -50,7 +66,7 @@ npm run build
 php artisan serve
 ```
 
-Akses aplikasi di `http://localhost:8000`.
+Akses aplikasi di `http://localhost:8000` (untuk artisan serve) atau di `http://dutashell.test` (untuk Herd).
 
 ## Konfigurasi SVM (.env)
 
@@ -87,16 +103,6 @@ SVM_SPLIT_SEED=42
 - `docs/README.md` - Ringkasan sistem, instalasi, dan konfigurasi.
 - `docs/user-guide.md` - Panduan penggunaan aplikasi.
 
-## Testing
-
-```bash
-# Jalankan seluruh test
-php artisan test
-
-# Test tertentu
-php artisan test tests/Feature/SVMControllerTest.php
-```
-
 ## Teknologi
 
 - Backend: PHP 8.2, Laravel 11.9
@@ -104,13 +110,62 @@ php artisan test tests/Feature/SVMControllerTest.php
 - ML: Rubix ML dan implementasi SVM kustom
 - Frontend: Blade Templates, Vite, JavaScript
 
-## Dukungan
+## Struktur Project
 
-- Dokumentasi: folder `docs/`
-- Issue: buka tiket di repository
-- Email: contact@yourdomain.com
+```
+KerjaPraktik/
+├── .editorconfig                 # Konfigurasi format kode
+├── .env.example                  # Template file environment
+├── .gitignore                    # File dan folder yang diabaikan oleh Git
+├── README.md                     # Dokumentasi utama proyek
+├── artisan                       # Command-line interface Laravel
+├── composer.json                 # Dependency dan konfigurasi proyek PHP
+├── composer.lock                 # Versi dependency yang terinstall
+├── composer.phar                 # Composer executable
+├── package.json                  # Dependency frontend
+├── phpunit.xml                   # Konfigurasi testing PHP
+├── vite.config.js                # Konfigurasi build asset frontend
+├── app/                          # Kode sumber utama aplikasi
+│   ├── Console/                  # Command-line commands
+│   ├── Exceptions/               # Handler exception
+│   ├── Http/                     # Controllers, middleware, request
+│   │   ├── Controllers/          # File controller aplikasi
+│   │   │   ├── AuthController.php     # Authentication
+│   │   │   ├── AtributController.php  # Management atribut
+│   │   │   ├── CaseController.php     # Management kasus
+│   │   │   ├── InferenceController.php # Inference system
+│   │   │   ├── SVMController.php      # SVM functionality
+│   │   │   └── ...                    # Other controllers
+│   │   ├── Middleware/           # HTTP middleware
+│   │   └── Requests/             # Form request validation
+│   ├── Models/                   # Model Eloquent
+│   ├── Support/                  # Helper dan support classes
+│   └── ...                       # Other app directories
+├── bootstrap/                    # File bootstrap aplikasi
+├── config/                       # File konfigurasi Laravel
+├── database/                     # Migration, seeders, factories
+├── dataset/                      # Dataset untuk training dan testing
+├── docs/                         # Dokumentasi proyek
+│   ├── README.md                 # Dokumentasi utama
+│   ├── INDEX.md                  # Indeks dokumentasi
+│   ├── user-guide.md             # Panduan pengguna
+│   └── api-endpoints.md          # Dokumentasi API endpoints
+├── public/                       # File publik (CSS, JS, gambar)
+│   ├── index.php                 # Entry point aplikasi
+│   ├── css/                      # Asset CSS
+│   ├── js/                       # Asset JS
+│   ├── vendor/                   # Asset vendor
+│   └── ...                       # File publik lainnya
+├── scripts/                      # Skrip eksternal (ML, DLL)
+│   └── decision-tree/            # Skrip algoritma decision tree
+│       ├── SVM.php               # Script training SVM
+│       └── SVMInfer.php          # Script inferensi SVM
+├── storage/                      # File disimpan (models, logs, dll.)
+│   └── app/
+│       └── svm/                  # Model SVM disimpan di sini
+├── svm_models/                   # Alternatif lokasi penyimpanan model SVM
+└── tests/                        # File testing
+    └── Feature/                  # Feature tests
+```
 
----
-
-**Versi**: 1.0.0  
-**Terakhir diperbarui**: Desember 2025
+**Made by**: 71220924-Giovanka S.H.P.
