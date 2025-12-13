@@ -9,6 +9,12 @@
   .svm-conf .axis {background: #f1f5f9; font-weight: 600;}
   .svm-distrib .bar {height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden;}
   .svm-distrib .fill {display: block; height: 100%; border-radius: 999px;}
+  .bench-row {border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin-bottom: 10px; background: #f8fafc;}
+  .bench-label {font-weight: 600; margin-bottom: 6px;}
+  .bench-kernels {display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;}
+  .bench-bar-track {height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden;}
+  .bench-bar-fill {display: block; height: 100%; border-radius: 999px;}
+  .bench-meta {font-size: 12px; color: #6b7280;}
 </style>
 <div class="container mt-4">
   <h2>Support Vector Machine (SVM)</h2>
@@ -158,144 +164,332 @@
         </div>
       @endif
     </div>
+
+    {{-- Confusion matrix train/test (langsung tampil setelah predict) --}}
+    @if(isset($conf) && is_array($conf) && is_array($labels) && count($labels) > 0)
+      <div class="card mb-4" id="svm-confusion">
+        <div class="card-header d-flex justify-content-between align-items-center fw-semibold">
+          <span>Confusion Matrix (Train/Test)</span>
+          <button
+            class="btn btn-sm btn-outline-secondary"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#svm-confusion-body"
+            aria-expanded="true"
+            aria-controls="svm-confusion-body"
+          >
+            Tampilkan/Sembunyikan
+          </button>
+        </div>
+        <div class="collapse show" id="svm-confusion-body">
+          <div class="card-body">
+            <div class="row g-4">
+            @if(is_array($cmTrain))
+              @php
+                $maxTrain = 0;
+                foreach ($cmTrain as $r) foreach ($r as $v) { if ($v > $maxTrain) $maxTrain = $v; }
+                $totalTrainRow = array_sum(array_map('array_sum', $cmTrain));
+              @endphp
+              <div class="col-lg-6">
+                <h6 class="mb-2">Train</h6>
+                <div class="svm-conf mb-3">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th class="axis">Actual \\ Pred</th>
+                        @foreach($labels as $lbl)
+                          <th>{{ $lbl }}</th>
+                        @endforeach
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @foreach($cmTrain as $i => $row)
+                        <tr>
+                          <th class="axis">{{ $labels[$i] ?? $i }}</th>
+                          @foreach($row as $v)
+                            @php
+                              $ratio = $maxTrain > 0 ? $v / $maxTrain : 0;
+                              $alpha = 0.18 + (0.55 * $ratio);
+                              $bg    = "rgba(37, 99, 235, {$alpha})";
+                              $fg    = $ratio > 0.55 ? '#fff' : '#111';
+                            @endphp
+                            <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
+                          @endforeach
+                        </tr>
+                      @endforeach
+                    </tbody>
+                  </table>
+                </div>
+                @if(!empty($distTrain))
+                  @php $totalTrain = max(1, array_sum(array_column($distTrain, 'total'))); @endphp
+                  <div class="svm-distrib">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                      <span class="fw-semibold">Distribusi Label (Train)</span>
+                      <small class="text-muted">Total {{ $totalTrainRow }} sampel</small>
+                    </div>
+                    @foreach($distTrain as $i => $d)
+                      @php
+                        $p = $totalTrain > 0 ? ($d['total'] / $totalTrain) * 100 : 0;
+                        $color = $palette[$i % count($palette)];
+                      @endphp
+                      <div class="mb-2">
+                        <div class="d-flex justify-content-between small text-muted">
+                          <span class="fw-semibold text-dark">{{ $d['label'] }}</span>
+                          <span>{{ number_format($p,1) }}% ({{ $d['total'] }})</span>
+                        </div>
+                        <div class="bar">
+                          <span class="fill" style="width: {{ max(3, $p) }}%; background: {{ $color }};"></span>
+                        </div>
+                      </div>
+                    @endforeach
+                  </div>
+                @endif
+              </div>
+            @endif
+
+            @if(is_array($cmTest))
+              @php
+                $maxTest = 0;
+                foreach ($cmTest as $r) foreach ($r as $v) { if ($v > $maxTest) $maxTest = $v; }
+                $totalTestRow = array_sum(array_map('array_sum', $cmTest));
+              @endphp
+              <div class="col-lg-6">
+                <h6 class="mb-2">Test</h6>
+                <div class="svm-conf mb-3">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th class="axis">Actual \\ Pred</th>
+                        @foreach($labels as $lbl)
+                          <th>{{ $lbl }}</th>
+                        @endforeach
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @foreach($cmTest as $i => $row)
+                        <tr>
+                          <th class="axis">{{ $labels[$i] ?? $i }}</th>
+                          @foreach($row as $v)
+                            @php
+                              $ratio = $maxTest > 0 ? $v / $maxTest : 0;
+                              $alpha = 0.18 + (0.55 * $ratio);
+                              $bg    = "rgba(16, 185, 129, {$alpha})";
+                              $fg    = $ratio > 0.55 ? '#fff' : '#111';
+                            @endphp
+                            <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
+                          @endforeach
+                        </tr>
+                      @endforeach
+                    </tbody>
+                  </table>
+                </div>
+                @if(!empty($distTest))
+                  @php $totalTest = max(1, array_sum(array_column($distTest, 'total'))); @endphp
+                  <div class="svm-distrib">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                      <span class="fw-semibold">Distribusi Label (Test)</span>
+                      <small class="text-muted">Total {{ $totalTestRow }} sampel</small>
+                    </div>
+                    @foreach($distTest as $i => $d)
+                      @php
+                        $p = $totalTest > 0 ? ($d['total'] / $totalTest) * 100 : 0;
+                        $color = $palette[$i % count($palette)];
+                      @endphp
+                      <div class="mb-2">
+                        <div class="d-flex justify-content-between small text-muted">
+                          <span class="fw-semibold text-dark">{{ $d['label'] }}</span>
+                          <span>{{ number_format($p,1) }}% ({{ $d['total'] }})</span>
+                        </div>
+                        <div class="bar">
+                          <span class="fill" style="width: {{ max(3, $p) }}%; background: {{ $color }};"></span>
+                        </div>
+                      </div>
+                    @endforeach
+                  </div>
+                @endif
+              </div>
+            @endif
+            </div>
+          </div>
+        </div>
+      </div>
+    @endif
   @endif
 
-  {{-- Visualisasi confusion matrix + distribusi label (hasil train/test) --}}
-  @if(isset($conf) && is_array($conf) && is_array($labels) && count($labels) > 0)
-    <div class="card mb-4">
-      <div class="card-header fw-semibold">Hasil Train/Test (Confusion Matrix &amp; Distribusi)</div>
-      <div class="card-body">
-        <div class="row g-4">
-          @if(is_array($cmTrain))
-            @php
-              $maxTrain = 0;
-              foreach ($cmTrain as $r) foreach ($r as $v) { if ($v > $maxTrain) $maxTrain = $v; }
-              $totalTrainRow = array_sum(array_map('array_sum', $cmTrain));
-            @endphp
-            <div class="col-lg-6">
-              <h6 class="mb-2">Confusion Matrix (Train)</h6>
-              <div class="svm-conf mb-3">
-                <table>
-                  <thead>
-                    <tr>
-                      <th class="axis">Actual \\ Pred</th>
-                      @foreach($labels as $lbl)
-                        <th>{{ $lbl }}</th>
-                      @endforeach
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @foreach($cmTrain as $i => $row)
-                      <tr>
-                        <th class="axis">{{ $labels[$i] ?? $i }}</th>
-                        @foreach($row as $v)
-                          @php
-                            $ratio = $maxTrain > 0 ? $v / $maxTrain : 0;
-                            $alpha = 0.18 + (0.55 * $ratio);
-                            $bg    = "rgba(37, 99, 235, {$alpha})";
-                            $fg    = $ratio > 0.55 ? '#fff' : '#111';
-                          @endphp
-                          <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
-                        @endforeach
-                      </tr>
-                    @endforeach
-                  </tbody>
-                </table>
-              </div>
+  {{-- Benchmark ringkas: Akurasi & waktu eksekusi per kernel --}}
+  @php
+    $bench = $benchmarks ?? [];
+    $benchCase = $bench['case_title'] ?? ('Case ' . Auth::id());
+    $benchKernels = $bench['kernels'] ?? [];
+    $benchColors = ['sgd' => '#2563eb', 'rbf' => '#ef4444', 'sigmoid' => '#10b981', 'sig' => '#10b981'];
+    $benchMaxTime = 0.0;
+    foreach ($benchKernels as $bk) {
+      $t = isset($bk['exec_time']) && is_numeric($bk['exec_time']) ? (float)$bk['exec_time'] : 0.0;
+      if ($t > $benchMaxTime) $benchMaxTime = $t;
+    }
+    $benchMaxTime = $benchMaxTime > 0 ? $benchMaxTime : 1.0;
+  @endphp
+  <div class="card mb-4" id="svm-benchmark">
+    <div class="card-header fw-semibold">Benchmark Kasus Anda</div>
+    <div class="card-body">
+      <p class="text-muted small mb-3">Metrik diambil dari log training terbaru per kernel untuk {{ $benchCase }} (user {{ Auth::id() }}). Jika belum pernah train, bagian ini akan kosong.</p>
 
-              {{-- Distribusi label actual pada data train --}}
-              @if(!empty($distTrain))
-                @php $totalTrain = max(1, array_sum(array_column($distTrain, 'total'))); @endphp
-                <div class="svm-distrib">
-                  <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span class="fw-semibold">Distribusi Label (Train)</span>
-                    <small class="text-muted">Total {{ $totalTrainRow }} sampel</small>
-                  </div>
-                  @foreach($distTrain as $i => $d)
-                    @php
-                      $p = $totalTrain > 0 ? ($d['total'] / $totalTrain) * 100 : 0;
-                      $color = $palette[$i % count($palette)];
-                    @endphp
-                    <div class="mb-2">
-                      <div class="d-flex justify-content-between small text-muted">
-                        <span class="fw-semibold text-dark">{{ $d['label'] }}</span>
-                        <span>{{ number_format($p,1) }}% ({{ $d['total'] }})</span>
-                      </div>
-                      <div class="bar">
-                        <span class="fill" style="width: {{ max(3, $p) }}%; background: {{ $color }};"></span>
-                      </div>
-                    </div>
-                  @endforeach
-                </div>
+      @if(empty($benchKernels))
+        <div class="alert alert-info mb-0">Belum ada data training SVM untuk ditampilkan.</div>
+      @else
+        <h6 class="mb-2">Akurasi (Train vs Test)</h6>
+        <div class="bench-kernels mb-3">
+          @foreach($benchKernels as $key => $b)
+            @php
+              $trainAcc = is_numeric($b['acc_train'] ?? null) ? (float)$b['acc_train'] : null;
+              $testAcc  = is_numeric($b['acc_test'] ?? null)  ? (float)$b['acc_test']  : null;
+              $trainPct = $trainAcc !== null ? max(3, min(100, $trainAcc)) : 0;
+              $testPct  = $testAcc  !== null ? max(3, min(100, $testAcc )) : 0;
+              $color    = $benchColors[strtolower($key)] ?? '#475569';
+            @endphp
+            <div class="bench-row">
+              <div class="bench-label">Kernel {{ strtoupper($key) }}</div>
+              <div class="bench-bar-track">
+                <span class="bench-bar-fill" style="width: {{ $trainPct }}%; background: {{ $color }};"></span>
+              </div>
+              <div class="bench-meta mt-1">Train: {{ $trainAcc !== null ? number_format($trainAcc, 2) . '%' : 'NA' }}</div>
+              <div class="bench-bar-track mt-2">
+                <span class="bench-bar-fill" style="width: {{ $testPct }}%; background: {{ $color }}; opacity: 0.65;"></span>
+              </div>
+              <div class="bench-meta mt-1">Test: {{ $testAcc !== null ? number_format($testAcc, 2) . '%' : 'NA' }}</div>
+              <div class="bench-meta mt-2">Sampel: train {{ $b['train_samples'] ?? 'NA' }}, test {{ $b['test_samples'] ?? 'NA' }}</div>
+              @if(!empty($b['created_at']))
+                <div class="bench-meta mt-1">Log: {{ $b['created_at'] }}</div>
               @endif
             </div>
-          @endif
-
-          @if(is_array($cmTest))
-            @php
-              $maxTest = 0;
-              foreach ($cmTest as $r) foreach ($r as $v) { if ($v > $maxTest) $maxTest = $v; }
-              $totalTestRow = array_sum(array_map('array_sum', $cmTest));
-            @endphp
-            <div class="col-lg-6">
-              <h6 class="mb-2">Confusion Matrix (Test)</h6>
-              <div class="svm-conf mb-3">
-                <table>
-                  <thead>
-                    <tr>
-                      <th class="axis">Actual \\ Pred</th>
-                      @foreach($labels as $lbl)
-                        <th>{{ $lbl }}</th>
-                      @endforeach
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @foreach($cmTest as $i => $row)
-                      <tr>
-                        <th class="axis">{{ $labels[$i] ?? $i }}</th>
-                        @foreach($row as $v)
-                          @php
-                            $ratio = $maxTest > 0 ? $v / $maxTest : 0;
-                            $alpha = 0.18 + (0.55 * $ratio);
-                            $bg    = "rgba(16, 185, 129, {$alpha})";
-                            $fg    = $ratio > 0.55 ? '#fff' : '#111';
-                          @endphp
-                          <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
-                        @endforeach
-                      </tr>
-                    @endforeach
-                  </tbody>
-                </table>
-              </div>
-
-              {{-- Distribusi label actual pada data test --}}
-              @if(!empty($distTest))
-                @php $totalTest = max(1, array_sum(array_column($distTest, 'total'))); @endphp
-                <div class="svm-distrib">
-                  <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span class="fw-semibold">Distribusi Label (Test)</span>
-                    <small class="text-muted">Total {{ $totalTestRow }} sampel</small>
-                  </div>
-                  @foreach($distTest as $i => $d)
-                    @php
-                      $p = $totalTest > 0 ? ($d['total'] / $totalTest) * 100 : 0;
-                      $color = $palette[$i % count($palette)];
-                    @endphp
-                    <div class="mb-2">
-                      <div class="d-flex justify-content-between small text-muted">
-                        <span class="fw-semibold text-dark">{{ $d['label'] }}</span>
-                        <span>{{ number_format($p,1) }}% ({{ $d['total'] }})</span>
-                      </div>
-                      <div class="bar">
-                        <span class="fill" style="width: {{ max(3, $p) }}%; background: {{ $color }};"></span>
-                      </div>
-                    </div>
-                  @endforeach
-                </div>
-              @endif
-            </div>
-          @endif
+          @endforeach
         </div>
+
+        <h6 class="mt-4 mb-2">Waktu Eksekusi (detik)</h6>
+        <div class="bench-kernels mb-3">
+          @foreach($benchKernels as $key => $b)
+            @php
+              $time  = is_numeric($b['exec_time'] ?? null) ? (float)$b['exec_time'] : null;
+              $ratio = $time !== null ? max(4, min(100, ($time / $benchMaxTime) * 100)) : 0;
+              $color = $benchColors[strtolower($key)] ?? '#475569';
+            @endphp
+            <div class="bench-row">
+              <div class="bench-label">Kernel {{ strtoupper($key) }}</div>
+              <div class="bench-bar-track">
+                <span class="bench-bar-fill" style="width: {{ $ratio }}%; background: {{ $color }};"></span>
+              </div>
+              <div class="bench-meta mt-1">Waktu: {{ $time !== null ? number_format($time, 4) . ' s' : 'NA' }}</div>
+            </div>
+          @endforeach
+        </div>
+      @endif
+    </div>
+  </div>
+
+  {{-- Confusion matrix dari log per kernel (run terakhir per kernel) --}}
+  @if(!empty($benchKernels))
+    <div class="card mb-4" id="svm-benchmark-cm">
+      <div class="card-header fw-semibold">Confusion Matrix per Kernel (Log Terbaru)</div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">Diambil dari log training terakhir per kernel (bukan dari aksi predict tunggal).</p>
+        @foreach($benchKernels as $key => $b)
+          @php
+            $cmTrain = $b['cm_train'] ?? null;
+            $cmTest  = $b['cm_test']  ?? null;
+            $labels  = $b['labels']   ?? [];
+            $dimTrain= is_array($cmTrain) ? count($cmTrain) : 0;
+            $dimTest = is_array($cmTest)  ? count($cmTest)  : 0;
+            $dim     = $dimTrain > 0 ? $dimTrain : $dimTest;
+            if (empty($labels) && $dim > 0) {
+              $labels = [];
+              for ($i = 0; $i < $dim; $i++) { $labels[] = "Label {$i}"; }
+            }
+          @endphp
+          <div class="bench-row">
+            <div class="bench-label">Kernel {{ strtoupper($key) }}</div>
+            @if(!is_array($cmTrain) && !is_array($cmTest))
+              <div class="bench-meta">Confusion matrix belum tersedia pada log terakhir.</div>
+            @else
+              <div class="row g-4">
+                @if(is_array($cmTrain))
+                  @php
+                    $maxTrain = 0;
+                    foreach ($cmTrain as $r) foreach ($r as $v) { if ($v > $maxTrain) $maxTrain = $v; }
+                  @endphp
+                  <div class="col-lg-6">
+                    <div class="fw-semibold mb-2">Train</div>
+                    <div class="svm-conf mb-2">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th class="axis">Actual \\ Pred</th>
+                            @foreach($labels as $lbl)
+                              <th>{{ $lbl }}</th>
+                            @endforeach
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @foreach($cmTrain as $i => $row)
+                            <tr>
+                              <th class="axis">{{ $labels[$i] ?? $i }}</th>
+                              @foreach($row as $v)
+                                @php
+                                  $ratio = $maxTrain > 0 ? $v / $maxTrain : 0;
+                                  $alpha = 0.18 + (0.55 * $ratio);
+                                  $bg    = "rgba(37, 99, 235, {$alpha})";
+                                  $fg    = $ratio > 0.55 ? '#fff' : '#111';
+                                @endphp
+                                <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
+                              @endforeach
+                            </tr>
+                          @endforeach
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                @endif
+
+                @if(is_array($cmTest))
+                  @php
+                    $maxTest = 0;
+                    foreach ($cmTest as $r) foreach ($r as $v) { if ($v > $maxTest) $maxTest = $v; }
+                  @endphp
+                  <div class="col-lg-6">
+                    <div class="fw-semibold mb-2">Test</div>
+                    <div class="svm-conf mb-2">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th class="axis">Actual \\ Pred</th>
+                            @foreach($labels as $lbl)
+                              <th>{{ $lbl }}</th>
+                            @endforeach
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @foreach($cmTest as $i => $row)
+                            <tr>
+                              <th class="axis">{{ $labels[$i] ?? $i }}</th>
+                              @foreach($row as $v)
+                                @php
+                                  $ratio = $maxTest > 0 ? $v / $maxTest : 0;
+                                  $alpha = 0.18 + (0.55 * $ratio);
+                                  $bg    = "rgba(16, 185, 129, {$alpha})";
+                                  $fg    = $ratio > 0.55 ? '#fff' : '#111';
+                                @endphp
+                                <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
+                              @endforeach
+                            </tr>
+                          @endforeach
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                @endif
+              </div>
+            @endif
+          </div>
+        @endforeach
       </div>
     </div>
   @endif
