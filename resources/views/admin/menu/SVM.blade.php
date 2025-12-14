@@ -313,7 +313,7 @@
           </div>
         </div>
       </div>
-    @endif
+  @endif
   @endif
 
   {{-- Benchmark ringkas: Akurasi & waktu eksekusi per kernel --}}
