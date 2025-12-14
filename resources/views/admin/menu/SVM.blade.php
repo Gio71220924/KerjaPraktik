@@ -386,17 +386,28 @@
     </div>
   </div>
 
-  {{-- Confusion matrix dari log per kernel (run terakhir per kernel) --}}
+  {{-- Confusion matrix satu kartu (log training terbaru) --}}
   @if(!empty($benchKernels))
+    @php
+      $latestKey = null; $latest = null; $latestTs = null;
+      foreach ($benchKernels as $key => $b) {
+        $ts = isset($b['created_at']) ? strtotime((string)$b['created_at']) : null;
+        if ($latest === null || ($ts !== null && $ts >= ($latestTs ?? -INF))) {
+          $latest = $b; $latestKey = $key; $latestTs = $ts;
+        }
+      }
+    @endphp
     <div class="card mb-4" id="svm-benchmark-cm">
-      <div class="card-header fw-semibold">Confusion Matrix per Kernel (Log Terbaru)</div>
+      <div class="card-header fw-semibold">Confusion Matrix (Log Terakhir)</div>
       <div class="card-body">
-        <p class="text-muted small mb-3">Diambil dari log training terakhir per kernel (bukan dari aksi predict tunggal).</p>
-        @foreach($benchKernels as $key => $b)
+        @if($latest === null)
+          <div class="alert alert-info mb-0">Belum ada log training yang memuat confusion matrix.</div>
+        @else
+          <p class="text-muted small mb-3">Diambil dari log training terakhir (kernel {{ strtoupper($latestKey ?? '-') }}).</p>
           @php
-            $cmTrain = $b['cm_train'] ?? null;
-            $cmTest  = $b['cm_test']  ?? null;
-            $labels  = $b['labels']   ?? [];
+            $cmTrain = $latest['cm_train'] ?? null;
+            $cmTest  = $latest['cm_test']  ?? null;
+            $labels  = $latest['labels']   ?? [];
             $dimTrain= is_array($cmTrain) ? count($cmTrain) : 0;
             $dimTest = is_array($cmTest)  ? count($cmTest)  : 0;
             $dim     = $dimTrain > 0 ? $dimTrain : $dimTest;
@@ -406,7 +417,12 @@
             }
           @endphp
           <div class="bench-row">
-            <div class="bench-label">Kernel {{ strtoupper($key) }}</div>
+            <div class="bench-label d-flex justify-content-between">
+              <span>Kernel {{ strtoupper($latestKey ?? '-') }}</span>
+              @if(!empty($latest['created_at']))
+                <small class="text-muted">Log: {{ $latest['created_at'] }}</small>
+              @endif
+            </div>
             @if(!is_array($cmTrain) && !is_array($cmTest))
               <div class="bench-meta">Confusion matrix belum tersedia pada log terakhir.</div>
             @else
@@ -439,7 +455,7 @@
                                   $bg    = "rgba(37, 99, 235, {$alpha})";
                                   $fg    = $ratio > 0.55 ? '#fff' : '#111';
                                 @endphp
-                                <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
+                                  <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
                               @endforeach
                             </tr>
                           @endforeach
@@ -489,7 +505,7 @@
               </div>
             @endif
           </div>
-        @endforeach
+        @endif
       </div>
     </div>
   @endif

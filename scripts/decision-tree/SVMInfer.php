@@ -120,39 +120,39 @@ function applyKernel(array $xBase, string $type, array $meta, array $baseIndex):
 
   if ($type==='rbf'){
     $D=(int)($meta['D'] ?? 128); $gamma=(float)($meta['gamma'] ?? 0.25);
-    $seed=(int)($meta['seed'] ?? crc32(json_encode(array_keys($baseIndex)))); mt_srand($seed);
-    $B=count($xBase); $omega=[]; $b=[]; $z=array_fill(0,$D,0.0);
-    for($j=0;$j<$D;$j++){
-      $row=[]; for($k=0;$k<$B;$k++){
-        $u1=max(mt_rand()/mt_getrandmax(),1e-12); $u2=mt_rand()/mt_getrandmax();
-        $n=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
-        $row[]=sqrt(2.0*$gamma)*$n;
-      }
-      $omega[]=$row; $b[]=(mt_rand()/mt_getrandmax())*2.0*M_PI;
-    }
+    $seed=(int)($meta['seed'] ?? crc32(json_encode(array_keys($baseIndex))));
+    $B=count($xBase); $z=array_fill(0,$D,0.0);
     $scale=sqrt(2.0/$D);
+    $randMax = mt_getrandmax() ?: 1;
     for($j=0;$j<$D;$j++){
-      $dot=0.0; for($k=0;$k<$B;$k++) $dot+=$omega[$j][$k]*$xBase[$k];
-      $z[$j]=$scale*cos($dot+$b[$j]);
+      mt_srand($seed+$j, MT_RAND_MT19937);
+      $dot=0.0;
+      for($k=0;$k<$B;$k++){
+        $u1=max(mt_rand()/$randMax,1e-12); $u2=mt_rand()/$randMax;
+        $n=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
+        $dot+=sqrt(2.0*$gamma)*$n*$xBase[$k];
+      }
+      $b=(mt_rand()/$randMax)*2.0*M_PI;
+      $z[$j]=$scale*cos($dot+$b);
     }
     return $z;
   }
 
   if ($type==='sigmoid'){
     $D=(int)($meta['D'] ?? 128); $scale=(float)($meta['scale'] ?? 1.0); $coef0=(float)($meta['coef0'] ?? 0.0);
-    $seed=(int)($meta['seed'] ?? (14641 ^ crc32(json_encode(array_keys($baseIndex))))); mt_srand($seed);
-    $B=count($xBase); $W=[]; $b=[]; $z=array_fill(0,$D,0.0);
-    for($j=0;$j<$D;$j++){
-      $row=[]; for($k=0;$k<$B;$k++){
-        $u1=max(mt_rand()/mt_getrandmax(),1e-12); $u2=mt_rand()/mt_getrandmax();
-        $n=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
-        $row[]=$scale*$n;
-      } $W[]=$row; $b[]=$coef0;
-    }
+    $seed=(int)($meta['seed'] ?? (14641 ^ crc32(json_encode(array_keys($baseIndex)))));
+    $B=count($xBase); $z=array_fill(0,$D,0.0);
     $norm=sqrt(1.0/$D);
+    $randMax = mt_getrandmax() ?: 1;
     for($j=0;$j<$D;$j++){
-      $dot=0.0; for($k=0;$k<$B;$k++) $dot+=$W[$j][$k]*$xBase[$k];
-      $z[$j]=$norm*tanh($dot+$b[$j]);
+      mt_srand($seed+$j, MT_RAND_MT19937);
+      $dot=0.0;
+      for($k=0;$k<$B;$k++){
+        $u1=max(mt_rand()/$randMax,1e-12); $u2=mt_rand()/$randMax;
+        $n=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
+        $dot+=$scale*$n*$xBase[$k];
+      }
+      $z[$j]=$norm*tanh($dot+$coef0);
     }
     return $z;
   }
