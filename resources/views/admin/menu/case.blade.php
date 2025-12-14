@@ -9,7 +9,6 @@
 
     <h1 class="mt-4">Project User: {{ $user->username }}</h1>
     <ol class="breadcrumb mb-4">
-        <li class="breadcrumb-item active">This Project Name Has Been Filled When You Registered</li>
     </ol>
     
     @if (isset($success))

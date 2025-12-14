@@ -20,6 +20,7 @@
         <div id="layoutSidenav_nav">
             @include('layouts.partials1.sidebar')
         </div>
+        <div id="layoutSidenav_resize" aria-label="Resize sidebar" title="Drag to resize sidebar"></div>
 
         <div id="layoutSidenav_content">
             <main>
