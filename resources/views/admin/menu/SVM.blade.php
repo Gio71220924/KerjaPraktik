@@ -31,10 +31,13 @@
   @if(is_array($meta) && !empty($meta))
     @php
       $samples   = $meta['samples']      ?? [];
-      $predict   = $meta['predict']      ?? [];
-      $predConf  = $predict['confidence'] ?? null;
-      $predLabel = $predict['label']      ?? null;
-      $predKernel= $predict['kernel']      ?? ($meta['kernel'] ?? null);
+      $predict   = $meta['predict']      ?? null;
+      $hasPredict= is_array($predict);
+      $predConf  = $hasPredict ? ($predict['confidence'] ?? null) : null;
+      $predLabel = $hasPredict ? ($predict['label'] ?? null) : null;
+      $predKernel= $hasPredict ? ($predict['kernel'] ?? ($meta['kernel'] ?? null)) : null;
+      $trainAcc  = isset($meta['train_accuracy']) ? $meta['train_accuracy'] : null;
+      $testAcc   = isset($meta['test_accuracy'])  ? $meta['test_accuracy']  : null;
       $threshold = $meta['threshold']      ?? null;
       $hyper     = $meta['hyperparams']    ?? [];
       $conf      = $meta['confusion']      ?? null;
@@ -62,49 +65,61 @@
       }
       $palette = ['#2563eb','#f97316','#10b981','#a855f7','#ef4444','#14b8a6','#f59e0b','#06b6d4'];
     @endphp
-    <div class="alert alert-info">
-      <strong>Hasil predict SVM (Generate &amp; Predict):</strong>
-      <ul class="mb-0">
-        <li>Jumlah data: latih = {{ $samples['train'] ?? '?' }}, uji = {{ $samples['test'] ?? '?' }} (total = {{ $samples['total'] ?? '?' }})</li>
-        <li>Prediksi terakhir: {{ $predLabel ?? '(tidak tersedia)' }}</li>
-        <li>Kernel yang dipilih: {{ $predKernel ?? '(tidak tersedia)' }}</li>
-        <li>
-          Akurasi prediksi (estimasi keyakinan):
-          @if($predConf !== null)
-            {{ number_format($predConf*100,2) }}%
-            @if($predConf < 0.7)
-              <span class="text-warning">(model kurang yakin, &lt; 70%)</span>
-            @else
-              <span class="text-success">(model cukup/sangat yakin)</span>
-            @endif
-          @else
-            NA
-          @endif
-        </li>
-        @php $top = $predict['top'] ?? []; @endphp
-        @if(is_array($top) && count($top) > 0)
-          <li>
-            Top rekomendasi keputusan:
-            <ol class="mb-0">
-              @foreach($top as $item)
-                <li>
-                  {{ $item['label'] ?? '?' }}
-                  ({{ isset($item['confidence']) ? number_format($item['confidence']*100,2) . '%' : 'NA' }})
-                </li>
-              @endforeach
-            </ol>
-          </li>
-        @endif
-        <li>Threshold keputusan: {{ $threshold !== null ? $threshold : 'default (0.0)' }}</li>
-        <li>Hyperparameter: epochs = {{ $hyper['epochs'] ?? '?' }}, lambda = {{ $hyper['lambda'] ?? '?' }}, eta0 = {{ $hyper['eta0'] ?? '?' }}, test_ratio = {{ $hyper['test_ratio'] ?? '0.2' }}</li>
-      </ul>
+    @if(!$hasPredict)
+      <div class="alert alert-info">
+        <strong>Hasil training SVM:</strong>
+        <ul class="mb-0">
+          <li>Akurasi train: {{ is_numeric($trainAcc) ? number_format($trainAcc * 100, 2) . '%' : 'NA' }}</li>
+          <li>Akurasi test: {{ is_numeric($testAcc) ? number_format($testAcc * 100, 2) . '%' : 'NA' }}</li>
+          <li>Kernel yang dipilih: {{ $meta['kernel'] ?? '(tidak tersedia)' }}</li>
+          <li>Hyperparameter: epochs = {{ $hyper['epochs'] ?? '?' }}, lambda = {{ $hyper['lambda'] ?? '?' }}, eta0 = {{ $hyper['eta0'] ?? '?' }}, test_ratio = {{ $hyper['test_ratio'] ?? '0.2' }}</li>
+          <li>Jumlah data (train/test): {{ $samples['train'] ?? '?' }} / {{ $samples['test'] ?? '?' }}</li>
+        </ul>
+      </div>
+    @endif
 
-      {{-- Visualisasi sederhana setelah Generate & Predict --}}
+    @if($hasPredict)
+      <div class="alert alert-primary">
+        <strong>Hasil prediksi SVM:</strong>
+        @php $top = $predict['top'] ?? []; @endphp
+        <ul class="mb-0">
+          <li>Prediksi terakhir: {{ $predLabel ?? '(tidak tersedia)' }}</li>
+          <li>
+            Akurasi prediksi (estimasi keyakinan):
+            @if($predConf !== null)
+              {{ number_format($predConf*100,2) }}%
+              @if($predConf < 0.7)
+                <span class="text-warning">(model kurang yakin, &lt; 70%)</span>
+              @else
+                <span class="text-success">(model cukup/sangat yakin)</span>
+              @endif
+            @else
+              NA
+            @endif
+          </li>
+          <li>Kernel yang dipakai: {{ $predKernel ?? '(tidak tersedia)' }}</li>
+          @if(is_array($top) && count($top) > 0)
+            <li>
+              Top rekomendasi keputusan:
+              <ol class="mb-0">
+                @foreach($top as $item)
+                  <li>
+                    {{ $item['label'] ?? '?' }}
+                    ({{ isset($item['confidence']) ? number_format($item['confidence']*100,2) . '%' : 'NA' }})
+                  </li>
+                @endforeach
+              </ol>
+            </li>
+          @endif
+          <li>Threshold keputusan: {{ $threshold !== null ? $threshold : 'default (0.0)' }}</li>
+        </ul>
+      </div>
+
+      {{-- Visualisasi sederhana setelah Predict --}}
       @php
         $confPercent = $predConf !== null ? max(0, min(100, $predConf * 100)) : null;
       @endphp
       @if($confPercent !== null || (is_array($top) && count($top) > 0))
-        <hr>
         <div class="mt-2">
           <h6 class="mb-2">Visualisasi Hasil Prediksi</h6>
 
@@ -163,7 +178,7 @@
           @endif
         </div>
       @endif
-    </div>
+    @endif
 
     {{-- Confusion matrix train/test (langsung tampil setelah predict) --}}
     @if(isset($conf) && is_array($conf) && is_array($labels) && count($labels) > 0)
@@ -365,6 +380,100 @@
           @endforeach
         </div>
 
+        {{-- Confusion matrix per kernel --}}
+        <div class="card mb-3">
+          <div class="card-header fw-semibold">Confusion Matrix per Kernel</div>
+          <div class="card-body">
+            @foreach($benchKernels as $key => $b)
+              @php
+                $cmT = $b['cm_train'] ?? null;
+                $cmS = $b['cm_test']  ?? null;
+                $labels = $b['labels'] ?? [];
+                $dim = is_array($cmT) ? count($cmT) : (is_array($cmS) ? count($cmS) : 0);
+                if (empty($labels) && $dim > 0) {
+                  $labels = [];
+                  for ($i = 0; $i < $dim; $i++) { $labels[] = "Label {$i}"; }
+                }
+              @endphp
+              <div class="mb-3">
+                <h6 class="mb-2">Kernel {{ strtoupper($key) }}</h6>
+                @if(!is_array($cmT) && !is_array($cmS))
+                  <div class="text-muted">Belum ada confusion matrix untuk kernel ini.</div>
+                @else
+                  <div class="row g-3">
+                    @if(is_array($cmT))
+                      @php $maxT = 0; foreach ($cmT as $r) foreach ($r as $v) { if ($v > $maxT) $maxT = $v; } @endphp
+                      <div class="col-md-6">
+                        <div class="svm-conf">
+                          <table class="mb-2">
+                            <thead>
+                              <tr>
+                                <th class="axis">Train<br>Actual \\ Pred</th>
+                                @foreach($labels as $lbl)
+                                  <th>{{ $lbl }}</th>
+                                @endforeach
+                              </tr>
+                            </thead>
+                            <tbody>
+                              @foreach($cmT as $i => $row)
+                                <tr>
+                                  <th class="axis">{{ $labels[$i] ?? $i }}</th>
+                                  @foreach($row as $v)
+                                    @php
+                                      $ratio = $maxT > 0 ? $v / $maxT : 0;
+                                      $alpha = 0.18 + (0.55 * $ratio);
+                                      $bg    = "rgba(37, 99, 235, {$alpha})";
+                                      $fg    = $ratio > 0.55 ? '#fff' : '#111';
+                                    @endphp
+                                    <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
+                                  @endforeach
+                                </tr>
+                              @endforeach
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    @endif
+                    @if(is_array($cmS))
+                      @php $maxS = 0; foreach ($cmS as $r) foreach ($r as $v) { if ($v > $maxS) $maxS = $v; } @endphp
+                      <div class="col-md-6">
+                        <div class="svm-conf">
+                          <table class="mb-2">
+                            <thead>
+                              <tr>
+                                <th class="axis">Test<br>Actual \\ Pred</th>
+                                @foreach($labels as $lbl)
+                                  <th>{{ $lbl }}</th>
+                                @endforeach
+                              </tr>
+                            </thead>
+                            <tbody>
+                              @foreach($cmS as $i => $row)
+                                <tr>
+                                  <th class="axis">{{ $labels[$i] ?? $i }}</th>
+                                  @foreach($row as $v)
+                                    @php
+                                      $ratio = $maxS > 0 ? $v / $maxS : 0;
+                                      $alpha = 0.18 + (0.55 * $ratio);
+                                      $bg    = "rgba(16, 185, 129, {$alpha})";
+                                      $fg    = $ratio > 0.55 ? '#fff' : '#111';
+                                    @endphp
+                                    <td style="background: {{ $bg }}; color: {{ $fg }};">{{ $v }}</td>
+                                  @endforeach
+                                </tr>
+                              @endforeach
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    @endif
+                  </div>
+                @endif
+              </div>
+            @endforeach
+          </div>
+        </div>
+
         <h6 class="mt-4 mb-2">Waktu Eksekusi (detik)</h6>
         <div class="bench-kernels mb-3">
           @foreach($benchKernels as $key => $b)
@@ -415,6 +524,28 @@
               $labels = [];
               for ($i = 0; $i < $dim; $i++) { $labels[] = "Label {$i}"; }
             }
+            // distribusi label actual (train/test) + total dataset
+            $distTrain = [];
+            $distTest  = [];
+            if (is_array($cmTrain)) {
+              foreach ($cmTrain as $i => $row) {
+                $distTrain[] = [
+                  'label' => $labels[$i] ?? "Label {$i}",
+                  'total' => array_sum($row),
+                ];
+              }
+            }
+            if (is_array($cmTest)) {
+              foreach ($cmTest as $i => $row) {
+                $distTest[] = [
+                  'label' => $labels[$i] ?? "Label {$i}",
+                  'total' => array_sum($row),
+                ];
+              }
+            }
+            $totalTrain = array_sum(array_column($distTrain, 'total')) ?: 0;
+            $totalTest  = array_sum(array_column($distTest, 'total')) ?: 0;
+            $palette = ['#2563eb','#f97316','#10b981','#a855f7','#ef4444','#14b8a6','#f59e0b','#06b6d4'];
           @endphp
           <div class="bench-row">
             <div class="bench-label d-flex justify-content-between">
@@ -422,6 +553,9 @@
               @if(!empty($latest['created_at']))
                 <small class="text-muted">Log: {{ $latest['created_at'] }}</small>
               @endif
+            </div>
+            <div class="bench-meta mb-2">
+              Total dataset (log ini): {{ $totalTrain + $totalTest }} sampel (train {{ $totalTrain }}, test {{ $totalTest }})
             </div>
             @if(!is_array($cmTrain) && !is_array($cmTest))
               <div class="bench-meta">Confusion matrix belum tersedia pada log terakhir.</div>
@@ -499,6 +633,59 @@
                           @endforeach
                         </tbody>
                       </table>
+                    </div>
+                  </div>
+                @endif
+              </div>
+              {{-- Distribusi label actual --}}
+              <div class="row g-4 mt-2">
+                @if(!empty($distTrain))
+                  <div class="col-lg-6">
+                    <div class="svm-distrib">
+                      <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-semibold">Distribusi Label (Train)</span>
+                        <small class="text-muted">Total {{ $totalTrain }}</small>
+                      </div>
+                      @foreach($distTrain as $i => $d)
+                        @php
+                          $p = $totalTrain > 0 ? ($d['total'] / $totalTrain) * 100 : 0;
+                          $color = $palette[$i % count($palette)];
+                        @endphp
+                        <div class="mb-2">
+                          <div class="d-flex justify-content-between small text-muted">
+                            <span class="fw-semibold text-dark">{{ $d['label'] }}</span>
+                            <span>{{ number_format($p,1) }}% ({{ $d['total'] }})</span>
+                          </div>
+                          <div class="bar">
+                            <span class="fill" style="width: {{ max(3, $p) }}%; background: {{ $color }};"></span>
+                          </div>
+                        </div>
+                      @endforeach
+                    </div>
+                  </div>
+                @endif
+                @if(!empty($distTest))
+                  <div class="col-lg-6">
+                    <div class="svm-distrib">
+                      <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-semibold">Distribusi Label (Test)</span>
+                        <small class="text-muted">Total {{ $totalTest }}</small>
+                      </div>
+                      @foreach($distTest as $i => $d)
+                        @php
+                          $p = $totalTest > 0 ? ($d['total'] / $totalTest) * 100 : 0;
+                          $color = $palette[$i % count($palette)];
+                        @endphp
+                        <div class="mb-2">
+                          <div class="d-flex justify-content-between small text-muted">
+                            <span class="fw-semibold text-dark">{{ $d['label'] }}</span>
+                            <span>{{ number_format($p,1) }}% ({{ $d['total'] }})</span>
+                          </div>
+                          <div class="bar">
+                            <span class="fill" style="width: {{ max(3, $p) }}%; background: {{ $color }};"></span>
+                          </div>
+                        </div>
+                      @endforeach
                     </div>
                   </div>
                 @endif
