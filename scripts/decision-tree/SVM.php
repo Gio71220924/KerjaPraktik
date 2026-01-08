@@ -347,6 +347,8 @@ $kcfg=parseKernel($kernelSpec);
 $biasIndex=$mappedDim; $dim=$mappedDim+1;
 
 ///////////////////////////// BUILD X, y ///////////////////////
+//  Konversi numerik
+
 $res->data_seek(0);
 $X=[]; $y=[]; $total=0; $skipNoLabel=0; $skipZero=0;
 $truncated=false;
