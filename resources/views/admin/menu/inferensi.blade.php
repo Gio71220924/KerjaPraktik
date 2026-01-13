@@ -89,39 +89,10 @@
         })
         ->values();
 
+    $search = trim((string) request()->input('search', ''));
+
     // Case title (opsional global; fallback ke row jika ada per-baris)
     $kasus = \App\Models\Kasus::where('case_num', $user->user_id)->first();
-
-    // === Label algoritma untuk tampilan
-    $renderAlgo = function($row) {
-        $src = $row->_source ?? 'user';
-        if ($src === 'fc') return 'Forward Chaining';
-        if ($src === 'bc') return 'Backward Chaining';
-
-        $ruleId   = strtoupper((string)($row->rule_id ?? ''));
-        $ruleGoal = (string)($row->rule_goal ?? $row->goal ?? '');
-        if ($ruleId === 'SVM' || stripos($ruleGoal, 'kernel=') !== false) {
-            return 'Support Vector Machine';
-        }
-        return 'Matching Rule';
-    };
-
-    // Ringkasan jumlah per sumber (untuk badge)
-    $cInfer = $rows1->count();
-    $cFC    = $rows2->count();
-    $cBC    = $rows3->count();
-    $cAll   = $all->count();
-
-    // Pagination (client-side on the merged collection)
-    $perPage = 10;
-    $page    = max((int) request()->input('page', 1), 1);
-    $paged   = new \Illuminate\Pagination\LengthAwarePaginator(
-        $all->slice(($page - 1) * $perPage, $perPage),
-        $all->count(),
-        $perPage,
-        $page,
-        ['path' => request()->url(), 'query' => request()->query()]
-    );
 
     // Util: buang prefix angka_ (e.g., "202_Olahraga" -> "Olahraga")
     $stripNumPrefix = function(string $s){
@@ -151,6 +122,65 @@
         $text = preg_replace('/\s+/', ' ', $text);
         return trim($text);
     };
+
+    // === Label algoritma untuk tampilan
+    $renderAlgo = function($row) {
+        $src = $row->_source ?? 'user';
+        if ($src === 'fc') return 'Forward Chaining';
+        if ($src === 'bc') return 'Backward Chaining';
+
+        $ruleId   = strtoupper((string)($row->rule_id ?? ''));
+        $ruleGoal = (string)($row->rule_goal ?? $row->goal ?? '');
+        if ($ruleId === 'SVM' || stripos($ruleGoal, 'kernel=') !== false) {
+            return 'Support Vector Machine';
+        }
+        return 'Matching Rule';
+    };
+
+    // Ringkasan jumlah per sumber (untuk badge)
+    $cInfer = $rows1->count();
+    $cFC    = $rows2->count();
+    $cBC    = $rows3->count();
+    $cAll   = $all->count();
+
+    // Filter pencarian (sebelum pagination)
+    if ($search !== '') {
+        $needle = strtolower($search);
+        $all = $all->filter(function($row) use ($needle, $formatRuleGoal, $kasus) {
+            $fields = [
+                $row->_disp_id ?? '',
+                $row->case_title ?? ($kasus->case_title ?? ''),
+                $row->rule_id ?? '',
+                $row->rule_goal ?? $row->goal ?? '',
+                $formatRuleGoal($row),
+                $row->_source ?? '',
+                $row->match_value ?? $row->score ?? '',
+            ];
+
+            foreach ($fields as $val) {
+                if ($val === null) {
+                    continue;
+                }
+                if (stripos((string) $val, $needle) !== false) {
+                    return true;
+                }
+            }
+            return false;
+        })->values();
+    }
+
+    $cFiltered = $all->count();
+
+    // Pagination (client-side on the merged collection)
+    $perPage = 10;
+    $page    = max((int) request()->input('page', 1), 1);
+    $paged   = new \Illuminate\Pagination\LengthAwarePaginator(
+        $all->slice(($page - 1) * $perPage, $perPage),
+        $all->count(),
+        $perPage,
+        $page,
+        ['path' => request()->url(), 'query' => request()->query()]
+    );
 @endphp
 
 <h1 class="mt-4">Inferensi - {{ $user->username }}</h1>
@@ -174,11 +204,15 @@
 @endif
 
 {{-- Ringkasan jumlah --}}
-<div class="mb-3 d-flex flex-wrap gap-2">
-  <span class="badge text-bg-primary">Total: {{ $cAll }}</span>
+<div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
+  <span class="badge text-bg-primary">Ditampilkan: {{ $cFiltered }}</span>
+  <span class="badge text-bg-dark">Total Data: {{ $cAll }}</span>
   <span class="badge text-bg-success">inferensi_user: {{ $cInfer }}</span>
   <span class="badge text-bg-info">inferensi_fc_user: {{ $cFC }}</span>
   <span class="badge text-bg-warning">inferensi_bc_user: {{ $cBC }}</span>
+  @if($search !== '')
+    <span class="badge text-bg-secondary">Filter: "{{ $search }}"</span>
+  @endif
 </div>
 
 {{-- Tombol kecil utilitas --}}
@@ -186,6 +220,23 @@
   <a href="{{ url()->current() }}" class="btn btn-sm btn-outline-secondary">Refresh</a>
   <a href="{{ route('test.case.form') }}" class="btn btn-sm btn-outline-primary">Lihat Test Case</a>
 </div>
+
+{{-- Search bar --}}
+<form method="GET" class="mb-3" role="search">
+  <div class="input-group" style="max-width: 520px;">
+    <input
+      type="text"
+      name="search"
+      class="form-control"
+      placeholder="Cari case title, rule id, atau goal..."
+      value="{{ $search }}"
+    >
+    <button class="btn btn-primary" type="submit">Cari</button>
+    @if($search !== '')
+      <a href="{{ url()->current() }}" class="btn btn-outline-secondary">Reset</a>
+    @endif
+  </div>
+</form>
 
 @if (!$t1Exists && !$t2Exists && !$t3Exists)
   <ol class="breadcrumb mb-4"><li class="breadcrumb-item active">Belum ada tabel inferensi untuk user ini.</li></ol>
@@ -251,10 +302,10 @@
         </tbody>
       </table>
     </div>
- +    <div class="mt-3">                                                                                                                              
-      {{ $paged->onEachSide(1)->links('pagination::bootstrap-5') }}                                                                                 
-    </div>                                                                                                                                          
-  </div>                                                                                                                                            
-@endif  
+    <div class="mt-3">
+      {{ $paged->onEachSide(1)->links('pagination::bootstrap-5') }}
+    </div>
+  </div>
+@endif
 
 @endsection

@@ -88,7 +88,10 @@ class SVMController extends Controller
             $classStats = collect();
         }
 
-        return view('admin.menu.SVM', compact('atributs','goalAttr','valuesByAttr','goalValues','svmData','classStats'))
+        // Ringkasan metrik SVM per kernel (ambil dari log terbaru user ini)
+        $benchmarks = $this->buildBenchmarksFromLogs($svmData, $userId);
+
+        return view('admin.menu.SVM', compact('atributs','goalAttr','valuesByAttr','goalValues','svmData','classStats','benchmarks'))
             ->with(['message' => null]);
     }
 
@@ -725,28 +728,22 @@ class SVMController extends Controller
             $D = (int)($meta['D'] ?? 128);
             $gamma = (float)($meta['gamma'] ?? 0.25);
             $seed  = (int)($meta['seed'] ?? crc32(json_encode(array_keys($baseIndex))));
-            mt_srand($seed);
-
             $B = count($xBase);
-            $omega=[]; $b=[];
-            for($j=0;$j<$D;$j++){
-                $row=[];
-                for($k=0;$k<$B;$k++){
-                    $u1=max(mt_rand()/mt_getrandmax(),1e-12);
-                    $u2=mt_rand()/mt_getrandmax();
-                    $z=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
-                    $row[]=sqrt(2.0*$gamma)*$z;
-                }
-                $omega[]=$row;
-            }
-            for($j=0;$j<$D;$j++) $b[]=(mt_rand()/mt_getrandmax())*2.0*M_PI;
             $scale = sqrt(2.0/$D);
+            $randMax = mt_getrandmax() ?: 1;
 
             $z = array_fill(0,$D,0.0);
             for($j=0;$j<$D;$j++){
+                mt_srand($seed+$j, MT_RAND_MT19937);
                 $dot=0.0;
-                for($k=0;$k<$B;$k++) $dot += $omega[$j][$k]*$xBase[$k];
-                $z[$j] = $scale * cos($dot + $b[$j]);
+                for($k=0;$k<$B;$k++){
+                    $u1=max(mt_rand()/$randMax,1e-12);
+                    $u2=mt_rand()/$randMax;
+                    $n=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
+                    $dot+=sqrt(2.0*$gamma)*$n*$xBase[$k];
+                }
+                $b=(mt_rand()/$randMax)*2.0*M_PI;
+                $z[$j] = $scale * cos($dot + $b);
             }
             return $z;
         }
@@ -756,26 +753,20 @@ class SVMController extends Controller
             $scale=(float)($meta['scale'] ?? 1.0);
             $coef0=(float)($meta['coef0'] ?? 0.0);
             $seed= (int)($meta['seed'] ?? (14641 ^ crc32(json_encode(array_keys($baseIndex)))));
-            mt_srand($seed);
-
             $B=count($xBase);
-            $W=[]; $b=[];
-            for($j=0;$j<$D;$j++){
-                $row=[];
-                for($k=0;$k<$B;$k++){
-                    $u1=max(mt_rand()/mt_getrandmax(),1e-12);
-                    $u2=mt_rand()/mt_getrandmax();
-                    $z=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
-                    $row[]=$scale*$z;
-                }
-                $W[]=$row; $b[]=$coef0;
-            }
             $norm=sqrt(1.0/$D);
+            $randMax = mt_getrandmax() ?: 1;
             $z=array_fill(0,$D,0.0);
             for($j=0;$j<$D;$j++){
+                mt_srand($seed+$j, MT_RAND_MT19937);
                 $dot=0.0;
-                for($k=0;$k<$B;$k++) $dot+=$W[$j][$k]*$xBase[$k];
-                $z[$j]=$norm*tanh($dot+$b[$j]);
+                for($k=0;$k<$B;$k++){
+                    $u1=max(mt_rand()/$randMax,1e-12);
+                    $u2=mt_rand()/$randMax;
+                    $n=sqrt(-2.0*log($u1))*cos(2.0*M_PI*$u2);
+                    $dot+=$scale*$n*$xBase[$k];
+                }
+                $z[$j]=$norm*tanh($dot+$coef0);
             }
             return $z;
         }
@@ -813,5 +804,121 @@ class SVMController extends Controller
                 // jika gagal (mis. hak akses), biarkan supaya error/log tampil jelas
             }
         }
+    }
+
+    /**
+     * Ambil ringkasan metrik & confusion matrix per kernel dari log svm_user_{id}.
+     * Hanya mengambil entri terbaru per kernel untuk user yang sedang login.
+     */
+    private function buildBenchmarksFromLogs(array|\Illuminate\Support\Collection $svmData, int $userId): array
+    {
+        $caseTitle = DB::table('kasus')->where('case_num', $userId)->value('case_title');
+        $kernels = [];
+
+        foreach ($svmData as $row) {
+            $parsed = $this->parseSvmLogOutput((string)($row->output ?? ''), (string)($row->model_path ?? null));
+            if (!$parsed || empty($parsed['kernel'])) {
+                continue;
+            }
+
+            $key     = $parsed['kernel'];
+            $rowTs   = isset($row->created_at) ? strtotime((string)$row->created_at) : null;
+            $currTs  = isset($kernels[$key]['created_at']) ? strtotime((string)$kernels[$key]['created_at']) : null;
+            $isNewer = $rowTs !== null && $currTs !== null ? $rowTs >= $currTs : true;
+
+            if (!isset($kernels[$key]) || $isNewer) {
+                $kernels[$key] = array_merge($parsed, [
+                    'status'     => $row->status ?? null,
+                    'created_at' => $row->created_at ?? null,
+                ]);
+            }
+        }
+
+        return [
+            'case_title' => $caseTitle ?: "Case {$userId}",
+            'kernels'    => $kernels,
+        ];
+    }
+
+    /**
+     * Parse string output log SVM untuk mengambil akurasi, eksekusi, dan confusion matrix.
+     */
+    private function parseSvmLogOutput(string $output, ?string $modelPath = null): ?array
+    {
+        $text = trim($output);
+        if ($text === '') {
+            return null;
+        }
+
+        $kernel = null;
+        if (preg_match('/SVM\\s+([a-z0-9_]+)/i', $text, $m)) {
+            $kernel = strtolower($m[1]);
+        } elseif ($modelPath && preg_match('/_([a-z0-9]+)\\.json$/i', $modelPath, $m)) {
+            $kernel = strtolower($m[1]);
+        }
+
+        $trainSamples = $this->matchInt($text, '/train=(\\d+)/i');
+        $testSamples  = $this->matchInt($text, '/test=(\\d+)/i');
+        $accTrain     = $this->matchFloat($text, '/acc_train=([0-9\\.]+)%?/i');
+        $accTest      = $this->matchFloat($text, '/acc_test=([0-9\\.NAna]+)%?/i');
+        $execTime     = $this->matchFloat($text, '/Execution time=([0-9\\.]+)/i');
+
+        $labels = [];
+        if (preg_match('/classes=([^;]+)/i', $text, $m)) {
+            $labels = array_values(array_filter(array_map('trim', explode('|', $m[1]))));
+        }
+
+        $cmTrain = $this->extractJsonFragment($text, 'cm_train');
+        $cmTest  = $this->extractJsonFragment($text, 'cm_test');
+
+        return [
+            'kernel'        => $kernel ?? 'unknown',
+            'train_samples' => $trainSamples,
+            'test_samples'  => $testSamples,
+            'acc_train'     => $accTrain,
+            'acc_test'      => $accTest,
+            'exec_time'     => $execTime,
+            'labels'        => $labels,
+            'cm_train'      => $cmTrain,
+            'cm_test'       => $cmTest,
+        ];
+    }
+
+    private function matchInt(string $text, string $pattern): ?int
+    {
+        if (preg_match($pattern, $text, $m)) {
+            return (int) $m[1];
+        }
+        return null;
+    }
+
+    private function matchFloat(string $text, string $pattern): ?float
+    {
+        if (preg_match($pattern, $text, $m)) {
+            $val = str_replace('%', '', trim($m[1]));
+            if (stripos($val, 'NA') !== false) {
+                return null;
+            }
+            if (is_numeric($val)) {
+                return (float) $val;
+            }
+        }
+        return null;
+    }
+
+    private function extractJsonFragment(string $text, string $key): ?array
+    {
+        $pattern = '/' . preg_quote($key, '/') . '=([^;]+)(?:;|$)/i';
+        if (!preg_match($pattern, $text, $m)) {
+            return null;
+        }
+
+        $raw = trim($m[1]);
+        if ($raw === '' || strcasecmp($raw, 'null') === 0) {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : null;
     }
 }

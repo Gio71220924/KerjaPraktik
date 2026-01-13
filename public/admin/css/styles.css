@@ -10934,6 +10934,76 @@ body {
   top: 56px;
 }
 
+/* === Adjustable sidebar (override) === */
+:root {
+  --sidebar-width: 225px;
+  --sidebar-min-width: 180px;
+  --sidebar-max-width: 360px;
+}
+#layoutSidenav #layoutSidenav_nav {
+  flex-basis: var(--sidebar-width);
+  transform: translateX(calc(-1 * var(--sidebar-width)));
+}
+#layoutSidenav #layoutSidenav_content {
+  margin-left: calc(-1 * var(--sidebar-width));
+}
+.sb-sidenav-toggled #layoutSidenav #layoutSidenav_nav {
+  transform: translateX(0);
+}
+.sb-sidenav-toggled #layoutSidenav #layoutSidenav_content {
+  margin-left: 0;
+}
+@media (min-width: 992px) {
+  #layoutSidenav #layoutSidenav_nav {
+    transform: translateX(0);
+  }
+  #layoutSidenav #layoutSidenav_content {
+    margin-left: 0;
+    transition: margin 0.15s ease-in-out;
+  }
+  .sb-sidenav-toggled #layoutSidenav #layoutSidenav_nav {
+    transform: translateX(calc(-1 * var(--sidebar-width)));
+  }
+  .sb-sidenav-toggled #layoutSidenav #layoutSidenav_content {
+    margin-left: calc(-1 * var(--sidebar-width));
+  }
+}
+.sb-nav-fixed #layoutSidenav #layoutSidenav_nav {
+  width: var(--sidebar-width);
+}
+.sb-nav-fixed #layoutSidenav #layoutSidenav_content {
+  padding-left: var(--sidebar-width);
+}
+#layoutSidenav_resize {
+  position: fixed;
+  top: 56px;
+  left: calc(var(--sidebar-width) - 6px); /* sedikit overlap ke sidebar */
+  width: 14px;
+  height: calc(100vh - 56px);
+  cursor: col-resize;
+  background: linear-gradient(90deg, rgba(148,163,184,0.18), rgba(148,163,184,0.35));
+  transition: background 0.2s ease, opacity 0.2s ease;
+  z-index: 1040;
+  pointer-events: auto;
+  touch-action: none;
+}
+#layoutSidenav_resize:hover,
+.resizing-sidebar #layoutSidenav_resize {
+  background: linear-gradient(90deg, rgba(99,102,241,0.35), rgba(79,70,229,0.45));
+}
+.resizing-sidebar {
+  user-select: none;
+  cursor: col-resize;
+}
+.sb-sidenav-toggled #layoutSidenav_resize {
+  display: none;
+}
+@media (max-width: 991.98px) {
+  #layoutSidenav_resize {
+    display: none;
+  }
+}
+
 #layoutError {
   display: flex;
   flex-direction: column;
